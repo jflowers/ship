@@ -105,11 +105,12 @@ repos:
   zero-dot-force/reading-stone:
     kinds: [npm]
     workflow: own
-    migrating: https://github.com/zero-dot-force/reading-stone/pull/34 # npm-release.yml@v0.3.0
+    migrating: https://github.com/zero-dot-force/reading-stone/pull/34 # npm-release.yml@v0.4.0
     notes: >-
       staged publishing (approved on npmjs.com with 2FA), version taken from
       the tag; npm's trusted publisher names release.yml and the `npm`
-      environment
+      environment. #34 is stacked on #35 (its release spec), so #35 merges
+      first
 
   # --- jflowers ---
   jflowers/gh-hud:
@@ -134,10 +135,10 @@ repos:
   jflowers/opencode-supervisor:
     kinds: [npm]
     workflow: own
-    migrating: https://github.com/jflowers/opencode-supervisor/pull/85 # npm-release.yml@v0.3.0
+    migrating: https://github.com/jflowers/opencode-supervisor/pull/85 # npm-release.yml@v0.4.0
     notes: npm's trusted publisher names publish.yml, which stays as the caller
   jflowers/opencode-auto-question:
     kinds: [npm]
     workflow: own
-    migrating: https://github.com/jflowers/opencode-auto-question/pull/42 # npm-release.yml@v0.3.0
+    migrating: https://github.com/jflowers/opencode-auto-question/pull/42 # npm-release.yml@v0.4.0
     notes: npm's trusted publisher names publish.yml, which stays as the caller

@@ -102,6 +102,14 @@ repos:
   zero-dot-force/snake-eyes:
     kinds: [pypi]
     workflow: own # PyPI trusted publishing must stay in the caller's job
+  zero-dot-force/reading-stone:
+    kinds: [npm]
+    workflow: own
+    migrating: https://github.com/zero-dot-force/reading-stone/pull/34 # npm-release.yml@v0.3.0
+    notes: >-
+      staged publishing (approved on npmjs.com with 2FA), version taken from
+      the tag; npm's trusted publisher names release.yml and the `npm`
+      environment
 
   # --- jflowers ---
   jflowers/gh-hud:
@@ -125,4 +133,11 @@ repos:
     mise: go:github.com/jflowers/ghws/cmd/ghws
   jflowers/opencode-supervisor:
     kinds: [npm]
-    workflow: own # npm trusted publishing is bound to publish.yml
+    workflow: own
+    migrating: https://github.com/jflowers/opencode-supervisor/pull/85 # npm-release.yml@v0.3.0
+    notes: npm's trusted publisher names publish.yml, which stays as the caller
+  jflowers/opencode-auto-question:
+    kinds: [npm]
+    workflow: own
+    migrating: https://github.com/jflowers/opencode-auto-question/pull/42 # npm-release.yml@v0.3.0
+    notes: npm's trusted publisher names publish.yml, which stays as the caller

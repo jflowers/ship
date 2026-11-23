@@ -1,0 +1,381 @@
+# Go release, shared by every Go CLI in repos.yaml
+# ===============================================
+# A repo's own release.yml calls this with a tag. In order:
+#
+#   preflight     org-infra: semver, tag uniqueness, CI on HEAD, unreleased
+#                 commits; creates the annotated tag
+#   release       org-infra: GoReleaser (archives, checksums, cosign, SBOMs,
+#                 and the cask as a release asset when the repo makes one)
+#   sign-macos    Developer ID signing + notarization of every darwin archive,
+#                 re-uploaded with checksums.txt rewritten to match. Skipped
+#                 (not failed) when MACOS_SIGN_P12 isn't passed.
+#   publish-cask  sets every sha256 in the cask from the final checksums.txt
+#                 and pushes it to the tap. Only when `tap` is set.
+#
+# The org-infra SHA lives here only, so bumping it once moves every repo.
+#
+# Caller permissions: contents: write, checks: read, id-token: write.
+#
+# Caller's GoReleaser config, when it publishes a cask:
+#   homebrew_casks: [{ ..., directory: Casks, skip_upload: true }]
+#   release.extra_files: [{ glob: dist/homebrew/Casks/<cask>.rb }]
+# and archives named <archive_prefix>_<version>_<os>_<arch>.tar.gz.
+
+name: Go release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release (e.g. v1.2.3)
+        required: true
+        type: string
+      ci_checks:
+        description: JSON array of check-run names that must pass on HEAD. Empty = org-infra auto-discovery.
+        type: string
+        default: ""
+      allow_prerelease:
+        type: boolean
+        default: true
+      skip_semver_check:
+        type: boolean
+        default: false
+      skip_ci_checks:
+        type: boolean
+        default: false
+      skip_unreleased_check:
+        type: boolean
+        default: false
+      binary:
+        description: The executable inside each archive. Defaults to the repo name.
+        type: string
+        default: ""
+      archive_prefix:
+        description: Archive name prefix (GoReleaser project_name). Defaults to the repo name.
+        type: string
+        default: ""
+      tap:
+        description: owner/repo of the Homebrew tap. Empty = no cask published.
+        type: string
+        default: ""
+      cask:
+        description: Cask name (<cask>.rb release asset, Casks/<cask>.rb in the tap). Defaults to the repo name.
+        type: string
+        default: ""
+    outputs:
+      tag:
+        value: ${{ jobs.preflight.outputs.tag }}
+    secrets:
+      MACOS_SIGN_P12:
+        description: Developer ID Application certificate + key, base64 .p12. Absent = no signing.
+        required: false
+      MACOS_SIGN_PASSWORD:
+        required: false
+      MACOS_SIGN_IDENTITY:
+        description: Signing identity. Absent = the Developer ID Application identity found in the .p12.
+        required: false
+      MACOS_NOTARY_KEY:
+        description: App Store Connect API key, base64 .p8
+        required: false
+      MACOS_NOTARY_KEY_ID:
+        required: false
+      MACOS_NOTARY_ISSUER_ID:
+        required: false
+      HOMEBREW_TAP_TOKEN:
+        description: Can push to the tap. Required when `tap` is set.
+        required: false
+
+permissions: {}
+
+jobs:
+  preflight:
+    name: Preflight
+    uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
+    with:
+      tag: ${{ inputs.tag }}
+      ci_checks: ${{ inputs.ci_checks }}
+      allow_prerelease: ${{ inputs.allow_prerelease }}
+      skip_semver_check: ${{ inputs.skip_semver_check }}
+      skip_ci_checks: ${{ inputs.skip_ci_checks }}
+      skip_unreleased_check: ${{ inputs.skip_unreleased_check }}
+    permissions:
+      contents: write
+      checks: read
+
+  release:
+    name: GoReleaser
+    needs: preflight
+    if: needs.preflight.outputs.tag != ''
+    uses: complytime/org-infra/.github/workflows/reusable_release_goreleaser.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
+    with:
+      tag: ${{ needs.preflight.outputs.tag }}
+    permissions:
+      contents: write
+      id-token: write
+
+  # Secrets can't appear in a job-level `if`, so a tiny job reports them.
+  settings:
+    name: Settings
+    needs: preflight
+    if: needs.preflight.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      sign: ${{ steps.s.outputs.sign }}
+      binary: ${{ steps.s.outputs.binary }}
+      prefix: ${{ steps.s.outputs.prefix }}
+      cask: ${{ steps.s.outputs.cask }}
+    steps:
+      - id: s
+        env:
+          HAS_P12: ${{ secrets.MACOS_SIGN_P12 != '' }}
+          HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+          TAP: ${{ inputs.tap }}
+          REPO: ${{ github.event.repository.name }}
+          BINARY: ${{ inputs.binary }}
+          PREFIX: ${{ inputs.archive_prefix }}
+          CASK: ${{ inputs.cask }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAP" ] && [ "$HAS_TAP_TOKEN" != true ]; then
+            echo "::error::tap is $TAP but HOMEBREW_TAP_TOKEN wasn't passed"
+            exit 1
+          fi
+          [ "$HAS_P12" = true ] || echo "::notice::MACOS_SIGN_P12 not passed: darwin archives ship unsigned"
+          {
+            echo "sign=$HAS_P12"
+            echo "binary=${BINARY:-$REPO}"
+            echo "prefix=${PREFIX:-$REPO}"
+            echo "cask=${CASK:-$REPO}"
+          } >> "$GITHUB_OUTPUT"
+
+  sign-macos:
+    name: Sign + notarize macOS
+    needs: [preflight, release, settings]
+    if: needs.settings.outputs.sign == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 45 # includes notarization waits
+    permissions:
+      contents: write # replaces release assets
+    env:
+      TAG: ${{ needs.preflight.outputs.tag }}
+      BINARY: ${{ needs.settings.outputs.binary }}
+      PREFIX: ${{ needs.settings.outputs.prefix }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Import the Developer ID
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          set -euo pipefail
+          keychain=$RUNNER_TEMP/signing.keychain-db
+          password=$(openssl rand -base64 32)
+          echo -n "$MACOS_SIGN_P12" | base64 --decode -o "$RUNNER_TEMP/cert.p12"
+          echo -n "$MACOS_NOTARY_KEY" | base64 --decode -o "$RUNNER_TEMP/notary.p8"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_SIGN_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
+          security list-keychain -d user -s "$keychain"
+          rm "$RUNNER_TEMP/cert.p12"
+          id=$MACOS_SIGN_IDENTITY
+          if [ -z "$id" ]; then
+            id=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+          fi
+          [ -n "$id" ] || { echo "::error::no Developer ID Application identity in MACOS_SIGN_P12"; exit 1; }
+          echo "SIGN_ID=$id" >> "$GITHUB_ENV"
+
+      - name: Download darwin archives
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "${PREFIX}_*_darwin_*.tar.gz" --pattern checksums.txt --dir in
+          ls in/"${PREFIX}"_*_darwin_*.tar.gz >/dev/null 2>&1 ||
+            { echo "::error::no ${PREFIX}_*_darwin_*.tar.gz in release $TAG"; exit 1; }
+
+      - name: Sign and notarize
+        env:
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for archive in in/"${PREFIX}"_*_darwin_*.tar.gz; do
+            name=$(basename "$archive")
+            echo "::group::$name"
+            work=$(mktemp -d)
+            tar -xzf "$archive" -C "$work"
+            [ -f "$work/$BINARY" ] || { echo "::error::$name has no top-level $BINARY"; exit 1; }
+            codesign --force --timestamp --options runtime --sign "$SIGN_ID" "$work/$BINARY"
+            codesign --verify --strict --verbose=2 "$work/$BINARY"
+            ditto -c -k "$work/$BINARY" "$work.zip"
+            xcrun notarytool submit "$work.zip" \
+              --key "$RUNNER_TEMP/notary.p8" --key-id "$MACOS_NOTARY_KEY_ID" \
+              --issuer "$MACOS_NOTARY_ISSUER_ID" --wait --timeout 20m
+            # Repack with the archive's own top-level names (no ./ prefix).
+            (cd "$work" && tar -czf "$GITHUB_WORKSPACE/out/$name" -- *)
+            rm -rf "$work" "$work.zip"
+            echo "::endgroup::"
+          done
+
+      - name: Rewrite checksums.txt
+        id: checksums
+        env:
+          SIGNED: out
+          IN: in/checksums.txt
+          OUT: checksums.txt
+        run: |
+          set -euo pipefail
+          # Rewrite only the signed archives' lines, in place, keeping order
+          # and the "<sum>  <name>" format sha256sum -c expects.
+          (cd "$SIGNED" && shasum -a 256 -- *.tar.gz) > signed.txt
+          awk 'NR == FNR { sum[$2] = $1; n++; next }
+               ($2 in sum) { $0 = sum[$2] "  " $2; seen++ }
+               { print }
+               END { if (seen != n) exit 1 }' signed.txt "$IN" > "$OUT" ||
+            { echo "::error::checksums.txt doesn't list every signed archive"; exit 1; }
+
+      - name: Replace the archives and checksums.txt
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber out/*.tar.gz checksums.txt
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8"
+
+  publish-cask:
+    name: Publish cask
+    needs: [preflight, release, settings, sign-macos]
+    if: >-
+      always()
+      && inputs.tap != ''
+      && needs.release.result == 'success'
+      && (needs.sign-macos.result == 'success' || needs.sign-macos.result == 'skipped')
+    # macOS: brew audits a cask's on_macos stanzas only on a Mac.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    # Concurrency groups are per repository: this serializes reruns of one
+    # repo's release, not two repos sharing a tap. The push retry below
+    # handles those.
+    concurrency:
+      group: homebrew-tap-${{ inputs.tap }}-${{ inputs.cask || github.event.repository.name }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.preflight.outputs.tag }}
+      CASK: ${{ needs.settings.outputs.cask }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+      TAP: ${{ inputs.tap }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the cask and final checksums
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$CASK.rb" --pattern checksums.txt --dir .
+
+      # Tested by scripts/test-steps.sh, which runs this block via yq.
+      # Keep the step id and the CASK_FILE/CHECKSUMS interface.
+      - name: Set every sha256 from checksums.txt
+        id: patch
+        env:
+          CASK_FILE: ${{ env.CASK }}.rb
+          CHECKSUMS: checksums.txt
+        run: |
+          set -euo pipefail
+          # Each `url "..._<os>_<arch>.tar.gz"` line takes the checksum of the
+          # one archive ending in _<os>_<arch>.tar.gz; its sha256 line is the
+          # line just before or just after the url. Order-independent and
+          # idempotent; fails if any url can't be matched.
+          awk '
+            NR == FNR {
+              if (match($2, /_[a-z0-9]+_[a-z0-9]+\.tar\.gz$/)) {
+                k = substr($2, RSTART); if (k in sum) dup[k] = 1; sum[k] = $1
+              }
+              next
+            }
+            { line[++n] = $0 }
+            END {
+              for (i = 1; i <= n; i++) {
+                if (line[i] !~ /^[[:space:]]*url "/) continue
+                if (!match(line[i], /_[a-z0-9]+_[a-z0-9]+\.tar\.gz"/)) continue
+                k = substr(line[i], RSTART, RLENGTH - 1)
+                if (!(k in sum) || (k in dup)) { printf "::error::no unique checksum for *%s\n", k > "/dev/stderr"; bad = 1; continue }
+                j = 0
+                if (i > 1 && line[i-1] ~ /^[[:space:]]*sha256 "[0-9a-f]*"[[:space:]]*$/) j = i - 1
+                else if (i < n && line[i+1] ~ /^[[:space:]]*sha256 "[0-9a-f]*"[[:space:]]*$/) j = i + 1
+                if (!j) { printf "::error::no sha256 next to the *%s url\n", k > "/dev/stderr"; bad = 1; continue }
+                sub(/sha256 "[0-9a-f]*"/, "sha256 \"" sum[k] "\"", line[j])
+                urls++
+              }
+              if (bad || !urls) { if (!urls) print "::error::the cask has no archive urls" > "/dev/stderr"; exit 1 }
+              for (i = 1; i <= n; i++) print line[i]
+            }
+          ' "$CHECKSUMS" "$CASK_FILE" > "$CASK_FILE.new"
+          mv "$CASK_FILE.new" "$CASK_FILE"
+
+      - name: Commit the cask in a clone of the tap
+        id: stage
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/${TAP}.git" tap
+          mkdir -p tap/Casks
+          cp "$CASK.rb" "tap/Casks/$CASK.rb"
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Casks/$CASK.rb"
+          if git diff --cached --quiet; then
+            echo "Casks/$CASK.rb already current"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -q -m "$CASK ${TAG#v}" -m "From ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Tested by scripts/test-audit-cask.sh (via yq). Keep the step id and
+      # the TAP_DIR/CASK interface.
+      - name: Audit the cask
+        id: audit
+        env:
+          TAP_DIR: tap
+        run: |
+          set -euo pipefail
+          # brew reads a cask only through a registered tap, and `brew tap
+          # <name> <path>` clones <path>, so this audits the committed cask.
+          name=ship-audit/candidate
+          brew untap "$name" >/dev/null 2>&1 || true
+          brew tap "$name" "$TAP_DIR"
+          trap 'brew untap "$name" >/dev/null 2>&1 || true' EXIT
+          brew trust "$name" >/dev/null 2>&1 || true # Homebrew 7 refuses untrusted taps
+          brew audit --cask --strict "$name/$CASK"
+
+      - name: Push to the tap
+        if: steps.stage.outputs.changed == 'true'
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          # Another repo may push to this tap at the same time; rebase onto
+          # it and retry. A conflict means someone else changed this cask:
+          # that fails rather than overwriting it.
+          branch=$(git rev-parse --abbrev-ref HEAD)
+          for attempt in 1 2 3 4 5; do
+            if git push -q origin "HEAD:$branch"; then exit 0; fi
+            echo "::warning::push rejected (attempt $attempt); rebasing onto the tap's latest $branch"
+            sleep $((attempt * 5))
+            git pull -q --rebase origin "$branch"
+          done
+          echo "::error::couldn't push to $TAP after 5 attempts"
+          exit 1

@@ -1,0 +1,79 @@
+# Every repo that publishes something, and how. The source of truth for
+# which shared workflow a repo calls, which tap it publishes to, and (later)
+# gh ship status/release, the sync job, and gh-hud's toolkit.toml.
+#
+# kinds:   go-cli        GoReleaser binaries (+ macOS signing when the
+#                        signing secrets are passed)
+#          cask          a Homebrew cask pushed to `tap`
+#          formula       a Homebrew formula pushed to `tap`
+#          mac-app       a signed, notarized .app (Swift)
+#          android-apk   a signed APK
+#          npm | pypi | container | cue-module
+# workflow: the shared workflow it calls today; "own" = not migrated yet.
+# mise:     its pin in chezmoi's dot_config/mise/config.toml, if any.
+
+taps:
+  jflowers: jflowers/homebrew-tools
+  unbound-force: unbound-force/homebrew-tap
+
+repos:
+  # --- unbound-force ---
+  unbound-force/replicator:
+    kinds: [go-cli, cask]
+    tap: unbound-force/homebrew-tap
+    workflow: own # first to migrate to go-release.yml
+    notes: >-
+      the live Casks/replicator.rb (0.7.0) has "#{staged_path}" in
+      postflight_steps, which Homebrew 7 can't read; fixed on branch
+      ci/release-via-ship, lands with the next release
+  unbound-force/dewey:
+    kinds: [go-cli, cask]
+    tap: unbound-force/homebrew-tap
+    workflow: own
+    mise: go:github.com/unbound-force/dewey/v3
+  unbound-force/gaze:
+    kinds: [go-cli, cask]
+    tap: unbound-force/homebrew-tap
+    workflow: own
+    notes: tap secret is named HOMEBREW_TAP_GITHUB_TOKEN; has post-release install checks
+    mise: go:github.com/unbound-force/gaze/v2/cmd/gaze
+  unbound-force/unbound-force:
+    kinds: [go-cli, cask, formula]
+    tap: unbound-force/homebrew-tap
+    workflow: own
+    notes: formula + staging-tap install test; needs formula support in go-release.yml
+    mise: go:github.com/unbound-force/unbound-force/cmd/unbound-force
+  unbound-force/containerfile:
+    kinds: [container]
+    workflow: own
+    notes: quay.io with username/password; actions not SHA-pinned
+  unbound-force/intake-kit:
+    kinds: [cue-module]
+    workflow: own
+
+  # --- zero-dot-force ---
+  zero-dot-force/vibe-check:
+    kinds: [go-cli]
+    workflow: own # org-infra at an untagged main SHA
+    mise: go:github.com/zero-dot-force/vibe-check/cmd/vibe-check
+  zero-dot-force/snake-eyes:
+    kinds: [pypi]
+    workflow: own # PyPI trusted publishing must stay in the caller's job
+
+  # --- jflowers ---
+  jflowers/gh-hud:
+    kinds: [go-cli, mac-app, cask, android-apk]
+    tap: jflowers/homebrew-tools
+    workflow: own
+    mise: go:github.com/jflowers/gh-hud/cmd/gh-hud
+  jflowers/gh-slack-notify:
+    kinds: [go-cli]
+    workflow: none # released by tag only; built from source by mise
+    mise: go:github.com/jflowers/gh-slack-notify/cmd/gh-slack-notify
+  jflowers/ghws:
+    kinds: [go-cli]
+    workflow: none # pinned to a commit in mise
+    mise: go:github.com/jflowers/ghws/cmd/ghws
+  jflowers/opencode-supervisor:
+    kinds: [npm]
+    workflow: own # npm trusted publishing is bound to publish.yml

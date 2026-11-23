@@ -1,0 +1,4 @@
+81aeb3267b9cafde11be9bef6b15ab6cbcaf1bf0d883576deefc5363c42660c3  replicator_0.5.4-rc2-SNAPSHOT-d59a3e8_darwin_amd64.tar.gz
+103f880c4f88e09ecb5154d33e4ed2d0dc53a3e8e643ffa66e6b655e1b9a668f  replicator_0.5.4-rc2-SNAPSHOT-d59a3e8_darwin_arm64.tar.gz
+35d5e02a58d7756476aaaf22dcb12571f89ba8e0571e6e02d49b6c91d00da9ba  replicator_0.5.4-rc2-SNAPSHOT-d59a3e8_linux_amd64.tar.gz
+f4b5d0ef663104eb3ff79be38e4579a45cb452e04333f0250e3c1be0559b3e46  replicator_0.5.4-rc2-SNAPSHOT-d59a3e8_linux_arm64.tar.gz

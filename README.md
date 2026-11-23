@@ -91,11 +91,45 @@ release:
     - glob: dist/homebrew/Casks/replicator.rb
 ```
 
+## Secrets
+
+ship holds no secrets. Each caller passes its own, and
+[`scripts/secrets-sync.sh`](scripts/secrets-sync.sh) sets them all from the
+dotfiles, as [`repos.yaml`](repos.yaml) says:
+
+- `secrets.sources`: the env files chezmoi decrypts from `secrets/*.age`
+  (`~/.config/apple-developer`, `~/.config/android-release`).
+- `secrets.sets`: named groups (`macos-sign`, `android-sign`); a repo lists
+  the ones its release needs under `secrets:`.
+- `secrets.taps`: which key holds each tap's token; a repo with a `tap` gets
+  it as `HOMEBREW_TAP_TOKEN`.
+- `secrets.orgs`: owners that get one org secret per name, visible only to
+  the repos that need it, instead of a copy in each repo. jflowers is a
+  personal account, so its repos get repo secrets.
+
+```bash
+scripts/secrets-sync.sh                          # plan: what it would set, and what's missing
+scripts/secrets-sync.sh --apply                  # set them all
+scripts/secrets-sync.sh --apply jflowers/gh-hud  # just one repo (or owner)
+scripts/secrets-sync.sh --apply --prune unbound-force
+```
+
+A repo secret overrides an org secret of the same name, so once the org
+secrets are set, `--prune` deletes the repo copies they replace; until then
+a rotation doesn't reach those repos. Org secrets need the `admin:org`
+scope (`gh auth refresh -s admin:org`). Rotating the Developer ID or notary
+key is: update the `.age` file, `chezmoi apply`, `secrets-sync.sh --apply`.
+
+`MACOS_SIGN_IDENTITY` isn't synced: `go-release.yml` reads it from the .p12.
+
+Since callers hand these secrets to code in this repo, pin `uses:` to a
+SHA, never `@main`, and keep `main` protected.
+
 ## Develop
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh
+actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-secrets-sync.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -103,7 +137,8 @@ scripts/test-audit-cask.sh   # macOS
 yq, so the workflow is the only copy): the checksum rewrite and cask patch
 against a real GoReleaser 2.15 cask in `scripts/testdata/`, and the tap push
 retry against a local bare repo. `scripts/test-audit-cask.sh` (macOS) runs
-the audit step on that cask.
+the audit step on that cask. `scripts/test-secrets-sync.sh` runs the sync
+against a fixture config, a fake `HOME` and a fake `gh`.
 
 ## Roadmap
 
@@ -111,7 +146,8 @@ the audit step on that cask.
   check from gaze, `container`, `npm`/`pypi` publish actions, `mac-app`
   (from gh-hud)
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
-- `gh ship status | release | secrets sync`, driven by `repos.yaml`
+- `gh ship status | release | secrets`, driven by `repos.yaml`
+  (`secrets-sync.sh` becomes `gh ship secrets`)
 - A sync job that keeps each repo's `release.yml` current; Renovate for the
   `@<sha>` pins
 - gh-hud: a Releases view, and `toolkit.toml` generated from `repos.yaml`

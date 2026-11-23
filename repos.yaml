@@ -11,15 +11,48 @@
 #          npm | pypi | container | cue-module
 # workflow: the shared workflow it calls today; "own" = not migrated yet.
 # mise:     its pin in chezmoi's dot_config/mise/config.toml, if any.
+# secrets:  the secret sets (below) its release needs; a repo with a `tap`
+#           also gets that tap's token as HOMEBREW_TAP_TOKEN.
 
 taps:
   jflowers: jflowers/homebrew-tools
   unbound-force: unbound-force/homebrew-tap
 
+# Release secrets, set by scripts/secrets-sync.sh. The values live in the
+# dotfiles: env files (KEY='value' lines) that chezmoi decrypts from
+# secrets/*.age. Nothing here is a value.
+secrets:
+  sources:
+    apple-developer: ~/.config/apple-developer
+    android-release: ~/.config/android-release
+  # Each secret's name -> source, or source:KEY when the file's key differs.
+  sets:
+    macos-sign:
+      MACOS_SIGN_P12: apple-developer
+      MACOS_SIGN_PASSWORD: apple-developer
+      MACOS_NOTARY_KEY: apple-developer
+      MACOS_NOTARY_KEY_ID: apple-developer
+      MACOS_NOTARY_ISSUER_ID: apple-developer
+    android-sign:
+      ANDROID_KEYSTORE: android-release
+      ANDROID_KEYSTORE_PASSWORD: android-release
+      ANDROID_KEY_ALIAS: android-release
+      ANDROID_KEY_PASSWORD: android-release
+  # The token each tap's publishers get as HOMEBREW_TAP_TOKEN: a fine-grained
+  # token with contents read/write on that tap only.
+  taps:
+    jflowers/homebrew-tools: apple-developer:HOMEBREW_TAP_TOKEN
+    unbound-force/homebrew-tap: apple-developer:HOMEBREW_TAP_TOKEN_UNBOUND_FORCE
+  # Owners whose secrets are set once, as organization secrets visible only
+  # to the repos listed here, instead of copied into each repo. (A personal
+  # account has no org secrets, so jflowers repos get repo secrets.)
+  orgs: [unbound-force]
+
 repos:
   # --- unbound-force ---
   unbound-force/replicator:
     kinds: [go-cli, cask]
+    secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
     workflow: own # first to migrate to go-release.yml
     notes: >-
@@ -28,17 +61,23 @@ repos:
       ci/release-via-ship, lands with the next release
   unbound-force/dewey:
     kinds: [go-cli, cask]
+    secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
     workflow: own
     mise: go:github.com/unbound-force/dewey/v3
   unbound-force/gaze:
     kinds: [go-cli, cask]
+    secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
     workflow: own
-    notes: tap secret is named HOMEBREW_TAP_GITHUB_TOKEN; has post-release install checks
+    notes: >-
+      its release.yml reads the tap token as HOMEBREW_TAP_GITHUB_TOKEN (a repo
+      secret the sync leaves alone) until it migrates; has post-release
+      install checks
     mise: go:github.com/unbound-force/gaze/v2/cmd/gaze
   unbound-force/unbound-force:
     kinds: [go-cli, cask, formula]
+    secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
     workflow: own
     notes: formula + staging-tap install test; needs formula support in go-release.yml
@@ -63,9 +102,15 @@ repos:
   # --- jflowers ---
   jflowers/gh-hud:
     kinds: [go-cli, mac-app, cask, android-apk]
+    secrets: [macos-sign, android-sign]
     tap: jflowers/homebrew-tools
     workflow: own
     mise: go:github.com/jflowers/gh-hud/cmd/gh-hud
+  jflowers/get-out:
+    kinds: [go-cli, cask]
+    secrets: [macos-sign]
+    tap: jflowers/homebrew-tools
+    workflow: own
   jflowers/gh-slack-notify:
     kinds: [go-cli]
     workflow: none # released by tag only; built from source by mise

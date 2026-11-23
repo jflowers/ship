@@ -22,6 +22,7 @@ jobs:
       - run: shellcheck scripts/*.sh
       - run: yq '.' repos.yaml > /dev/null
       - run: scripts/test-steps.sh
+      - run: scripts/test-secrets-sync.sh
 
   audit:
     name: Cask audit (macOS)

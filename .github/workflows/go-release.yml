@@ -380,7 +380,10 @@ jobs:
           brew tap "$name" "$TAP_DIR"
           trap 'brew untap "$name" >/dev/null 2>&1 || true' EXIT
           brew trust "$name" >/dev/null 2>&1 || true # Homebrew 7 refuses untrusted taps
-          brew audit --cask --strict "$name/$CASK"
+          # token_conflicts flags a cask named like a homebrew/core formula
+          # (gaze): a rule for casks in homebrew/cask, not a third-party
+          # tap's, whose casks install as <tap>/<cask>.
+          brew audit --cask --strict --except=token_conflicts "$name/$CASK"
 
       - name: Push to the tap
         if: steps.stage.outputs.changed == 'true'

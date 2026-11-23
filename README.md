@@ -103,21 +103,35 @@ release:
 
 ### `npm-release.yml`: npm package, through trusted publishing
 
+A release is one dispatch, plus your 2FA approval on npmjs.com when the
+version is staged.
+
 1. **Settings**: before anything is tagged, checks the run is on the default
-   branch, `version_from` is `package` or `tag`, and `npm_version` is new
-   enough (11.5.1 to publish, 11.15.0 to stage).
+   branch and `version_from` is `package` or `tag`, decides whether to stage
+   (below), and checks `npm_version` is new enough (11.5.1 to publish,
+   11.15.0 to stage).
 2. **Preflight** (org-infra): semver, tag uniqueness, CI on HEAD, unreleased
    commits; creates the tag.
 3. **Publish**: checks out the tag and checks `package.json`:
    - `repository.url` must be this repo, or trusted publishing fails;
    - the version must equal the tag (`version_from: package`), unless it's
      set from the tag (`version_from: tag`);
-   - the version mustn't already be on npm.
+   - if the version is already on npm (an earlier run, approved), the rest
+     of the job is skipped and the run goes on to the GitHub release, so a
+     re-run is safe.
 
-   Then it runs `install` and `checks`, and publishes with provenance, or,
-   with `stage: true`, stages the version for a maintainer to approve on
-   npmjs.com. A prerelease (`v1.2.0-rc.1`) goes to the `next` dist-tag, not
-   `latest`.
+   Then it runs `install` and `checks`, and publishes with provenance, or
+   stages the version for a maintainer to approve on npmjs.com. A prerelease
+   (`v1.2.0-rc.1`) goes to the `next` dist-tag, not `latest`.
+4. **GitHub release**: creates the release for the tag with generated notes
+   (a prerelease for `-suffix` tags), unless it exists. A staged version
+   shows here before it's public; if you reject it on npm, delete the
+   release by hand. The tag stays.
+
+**Staging.** With `stage: auto` (the default), a package whose repo belongs
+to an organization is staged, so nothing reaches npm without a
+maintainer's 2FA approval, and a package in a personal account is
+published straight away. `stage: true` or `false` overrides that.
 
 There's no npm token. npm trusts the *calling* workflow: the trusted
 publisher on npmjs.com names the caller's file (say `publish.yml`), never
@@ -157,10 +171,10 @@ jobs:
 
 Inputs: `tag`, `ci_checks`, `allow_prerelease` (default true),
 `skip_semver_check`, `skip_ci_checks`, `skip_unreleased_check`,
-`version_from` (`package` or `tag`, default `package`), `stage` (default
-false), `environment`, `node_version` (default 24), `bun_version` (empty: no
-Bun), `npm_version` (default 11.21.2), `install` (default `npm ci`) and
-`checks`.
+`version_from` (`package` or `tag`, default `package`), `stage` (`auto`,
+`true` or `false`, default `auto`), `github_release` (default true),
+`environment`, `node_version` (default 24), `bun_version` (empty: no Bun),
+`npm_version` (default 11.21.2), `install` (default `npm ci`) and `checks`.
 
 ## Secrets
 
@@ -209,8 +223,8 @@ yq, so the workflow is the only copy): the checksum rewrite and cask patch
 against a real GoReleaser 2.15 cask in `scripts/testdata/`, and the tap push
 retry against a local bare repo. `scripts/test-audit-cask.sh` (macOS) runs
 the audit step on that cask. `scripts/test-npm-steps.sh` runs
-`npm-release.yml`'s settings and `package.json` checks against fixture
-packages and a fake `npm view`. `scripts/test-secrets-sync.sh` runs the sync
+`npm-release.yml`'s settings, `package.json` and GitHub release steps
+against fixture packages, a fake `npm view` and a fake `gh`. `scripts/test-secrets-sync.sh` runs the sync
 against a fixture config, a fake `HOME` and a fake `gh`.
 
 ## Roadmap

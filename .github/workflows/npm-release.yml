@@ -1,15 +1,28 @@
 # npm release, shared by every npm package in repos.yaml
 # =====================================================
-# A repo's own publish workflow calls this with a tag. In order:
+# A repo's own publish workflow calls this with a tag. A release is then one
+# dispatch, plus a 2FA approval on npmjs.com when the version is staged.
+# In order:
 #
-#   settings   checks the inputs and that the run is on the default branch,
-#              before anything is tagged
-#   preflight  org-infra: semver, tag uniqueness, CI on HEAD, unreleased
-#              commits; creates the annotated tag
-#   publish    checks out the tag, checks package.json against the tag and
-#              the repo, installs, runs the caller's checks, then publishes
-#              through npm trusted publishing (OIDC, no token), or stages
-#              the version for a maintainer to approve on npmjs.com
+#   settings        checks the inputs and that the run is on the default
+#                   branch, and decides whether to stage, before anything is
+#                   tagged
+#   preflight       org-infra: semver, tag uniqueness, CI on HEAD,
+#                   unreleased commits; creates the annotated tag
+#   publish         checks out the tag, checks package.json against the tag
+#                   and the repo, installs, runs the caller's checks, then
+#                   publishes through npm trusted publishing (OIDC, no
+#                   token), or stages the version for a maintainer to approve
+#                   on npmjs.com. A version already on npm is skipped, so a
+#                   re-run still reaches the GitHub release.
+#   github-release  creates the GitHub release for the tag with generated
+#                   notes (a prerelease for vX.Y.Z-suffix tags), unless it
+#                   exists. A staged version shows here before it's public;
+#                   if it's rejected on npm, delete the release by hand.
+#
+# Staging (`stage: auto`, the default): packages in an organization are
+# staged for a maintainer's 2FA approval; packages in a personal account are
+# published straight away.
 #
 # Trusted publishing: npm checks the *calling* workflow's file name, so the
 # trusted publisher on npmjs.com names the caller (e.g. publish.yml), never
@@ -56,9 +69,17 @@ on:
         type: string
         default: package
       stage:
-        description: Stage the version (npm stage publish) for a maintainer to approve on npmjs.com, instead of publishing it.
+        description: >-
+          `auto`: stage when the repo belongs to an organization, publish
+          when it's in a personal account. `true`: stage the version (npm
+          stage publish) for a maintainer to approve on npmjs.com. `false`:
+          publish it.
+        type: string
+        default: auto
+      github_release:
+        description: Create the GitHub release for the tag, with generated notes.
         type: boolean
-        default: false
+        default: true
       environment:
         description: GitHub environment for the publish job; must match the trusted publisher's environment, if it names one.
         type: string
@@ -94,11 +115,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
+    outputs:
+      stage: ${{ steps.s.outputs.stage }}
     steps:
       - id: s
         env:
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
           VERSION_FROM: ${{ inputs.version_from }}
           NPM_VERSION: ${{ inputs.npm_version }}
           STAGE: ${{ inputs.stage }}
@@ -112,14 +136,25 @@ jobs:
             package | tag) ;;
             *) echo "::error::version_from is '$VERSION_FROM'; use package or tag"; exit 1 ;;
           esac
+          case "$STAGE:$OWNER_TYPE" in
+            auto:Organization) stage=true ;;
+            auto:User) stage=false ;;
+            auto:*) echo "::error::stage is auto but the owner type is '$OWNER_TYPE'; pass stage: true or false"; exit 1 ;;
+            true:* | false:*) stage=$STAGE ;;
+            *) echo "::error::stage is '$STAGE'; use auto, true or false"; exit 1 ;;
+          esac
           # Oldest npm that can do the job: 11.5.1 for trusted publishing,
           # 11.15.0 for staging.
           need=11.5.1
-          [ "$STAGE" = true ] && need=11.15.0
+          [ "$stage" = true ] && need=11.15.0
           if ! printf '%s\n%s\n' "$need" "$NPM_VERSION" | sort -C -V; then
             echo "::error::npm_version $NPM_VERSION is too old; this release needs $need or later"
             exit 1
           fi
+          if [ "$stage" = true ]; then
+            echo "::notice::The version will be staged; approve it on npmjs.com (2FA) to make it public"
+          fi
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
 
   preflight:
     name: Preflight
@@ -137,8 +172,8 @@ jobs:
       checks: read
 
   publish:
-    name: ${{ inputs.stage && 'Stage' || 'Publish' }} to npm
-    needs: preflight
+    name: ${{ needs.settings.outputs.stage == 'true' && 'Stage' || 'Publish' }} to npm
+    needs: [settings, preflight]
     if: needs.preflight.outputs.tag != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -157,10 +192,6 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
           registry-url: https://registry.npmjs.org
-      - if: inputs.bun_version != ''
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ inputs.bun_version }}
       - name: Install npm ${{ inputs.npm_version }}
         env:
           NPM_VERSION: ${{ inputs.npm_version }}
@@ -187,9 +218,13 @@ jobs:
             echo "::error::package.json version is $version but the tag is $TAG; bump it to $want (or pass version_from: tag)"
             exit 1
           fi
+          # Already public (an earlier run, approved): nothing to publish,
+          # but the run goes on to the GitHub release.
           if npm view "$name@$want" version >/dev/null 2>&1; then
-            echo "::error::$name@$want is already on npm"
-            exit 1
+            published=true
+            echo "::notice::$name@$want is already on npm; skipping the checks and publishing"
+          else
+            published=false
           fi
           case "$want" in
             *-*) dist_tag=next ;;
@@ -199,28 +234,35 @@ jobs:
             echo "name=$name"
             echo "version=$want"
             echo "dist_tag=$dist_tag"
+            echo "published=$published"
           } >> "$GITHUB_OUTPUT"
 
+      - if: steps.package.outputs.published == 'false' && inputs.bun_version != ''
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
       - name: Install
+        if: steps.package.outputs.published == 'false'
         env:
           INSTALL: ${{ inputs.install }}
         run: bash -euo pipefail -c "$INSTALL"
       - name: Checks
-        if: inputs.checks != ''
+        if: steps.package.outputs.published == 'false' && inputs.checks != ''
         env:
           CHECKS: ${{ inputs.checks }}
         run: bash -euo pipefail -c "$CHECKS"
 
       # After the checks, which test the tag as committed.
       - name: Set the version from the tag
-        if: inputs.version_from == 'tag'
+        if: steps.package.outputs.published == 'false' && inputs.version_from == 'tag'
         env:
           VERSION: ${{ steps.package.outputs.version }}
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
-      - name: ${{ inputs.stage && 'Stage' || 'Publish' }} ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}
+      - name: ${{ needs.settings.outputs.stage == 'true' && 'Stage' || 'Publish' }} ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}
+        if: steps.package.outputs.published == 'false'
         env:
-          STAGE: ${{ inputs.stage }}
+          STAGE: ${{ needs.settings.outputs.stage }}
           DIST_TAG: ${{ steps.package.outputs.dist_tag }}
         run: |
           set -euo pipefail
@@ -230,3 +272,29 @@ jobs:
           if [ "$STAGE" = true ]; then
             echo "::notice::Staged; approve it on npmjs.com (2FA) to make it public"
           fi
+
+  github-release:
+    name: GitHub release
+    needs: [preflight, publish]
+    if: inputs.github_release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists; leaving it unchanged"
+            exit 0
+          fi
+          flags=(--verify-tag --generate-notes)
+          case "$TAG" in
+            *-*) flags+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" "${flags[@]}"

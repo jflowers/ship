@@ -10,6 +10,7 @@
 #          android-apk   a signed APK
 #          npm | pypi | container | cue-module
 # workflow: the shared workflow it calls today; "own" = not migrated yet.
+# migrating: the open PR that moves it to a shared workflow, until merged.
 # mise:     its pin in chezmoi's dot_config/mise/config.toml, if any.
 # secrets:  the secret sets (below) its release needs; a repo with a `tap`
 #           also gets that tap's token as HOMEBREW_TAP_TOKEN.
@@ -54,26 +55,32 @@ repos:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: own # first to migrate to go-release.yml
+    workflow: own
+    migrating: https://github.com/unbound-force/replicator/pull/176 # go-release.yml@v0.1.0
     notes: >-
       the live Casks/replicator.rb (0.7.0) has "#{staged_path}" in
-      postflight_steps, which Homebrew 7 can't read; fixed on branch
-      ci/release-via-ship, lands with the next release
+      postflight_steps, which Homebrew 7 can't read; the migration PR fixes
+      it, and the next release publishes the fix
   unbound-force/dewey:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
     workflow: own
+    migrating: https://github.com/unbound-force/dewey/pull/246 # go-release.yml@v0.2.1
+    notes: >-
+      its cask uses the deprecated `postflight do` hook (a hard error in
+      Homebrew after 2027-12-11); move it to postflight_steps like replicator
     mise: go:github.com/unbound-force/dewey/v3
   unbound-force/gaze:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
     workflow: own
+    migrating: https://github.com/unbound-force/gaze/pull/362 # go-release.yml@v0.2.1
     notes: >-
-      its release.yml reads the tap token as HOMEBREW_TAP_GITHUB_TOKEN (a repo
-      secret the sync leaves alone) until it migrates; has post-release
-      install checks
+      its tap token is the repo secret HOMEBREW_TAP_GITHUB_TOKEN, mapped to
+      HOMEBREW_TAP_TOKEN in its caller (the sync leaves it alone); keeps
+      three release gates and post-release-install-check.yml of its own
     mise: go:github.com/unbound-force/gaze/v2/cmd/gaze
   unbound-force/unbound-force:
     kinds: [go-cli, cask, formula]

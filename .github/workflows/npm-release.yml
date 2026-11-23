@@ -1,0 +1,232 @@
+# npm release, shared by every npm package in repos.yaml
+# =====================================================
+# A repo's own publish workflow calls this with a tag. In order:
+#
+#   settings   checks the inputs and that the run is on the default branch,
+#              before anything is tagged
+#   preflight  org-infra: semver, tag uniqueness, CI on HEAD, unreleased
+#              commits; creates the annotated tag
+#   publish    checks out the tag, checks package.json against the tag and
+#              the repo, installs, runs the caller's checks, then publishes
+#              through npm trusted publishing (OIDC, no token), or stages
+#              the version for a maintainer to approve on npmjs.com
+#
+# Trusted publishing: npm checks the *calling* workflow's file name, so the
+# trusted publisher on npmjs.com names the caller (e.g. publish.yml), never
+# this file, and renaming the caller breaks publishing until it's updated
+# there. When the trusted publisher names a GitHub environment, pass it as
+# `environment`. Provenance is generated automatically.
+#
+# Lifecycle scripts don't run at publish (--ignore-scripts): `checks` must
+# build whatever the package ships.
+#
+# Caller permissions: contents: write, checks: read, id-token: write.
+
+name: npm release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release (e.g. v1.2.3)
+        required: true
+        type: string
+      ci_checks:
+        description: JSON array of check-run names that must pass on HEAD. Empty = org-infra auto-discovery.
+        type: string
+        default: ""
+      allow_prerelease:
+        description: Accept vX.Y.Z-suffix tags. A prerelease is published under the `next` dist-tag, not `latest`.
+        type: boolean
+        default: true
+      skip_semver_check:
+        type: boolean
+        default: false
+      skip_ci_checks:
+        type: boolean
+        default: false
+      skip_unreleased_check:
+        type: boolean
+        default: false
+      version_from:
+        description: >-
+          `package`: package.json's version must equal the tag (minus the v).
+          `tag`: package.json holds a placeholder and the version is set from
+          the tag at publish time, without a commit.
+        type: string
+        default: package
+      stage:
+        description: Stage the version (npm stage publish) for a maintainer to approve on npmjs.com, instead of publishing it.
+        type: boolean
+        default: false
+      environment:
+        description: GitHub environment for the publish job; must match the trusted publisher's environment, if it names one.
+        type: string
+        default: ""
+      node_version:
+        type: string
+        default: "24"
+      bun_version:
+        description: Set up Bun at this version (e.g. 1.4.4 or latest). Empty = no Bun.
+        type: string
+        default: ""
+      npm_version:
+        description: npm CLI used to publish. Trusted publishing needs 11.5.1+, staging 11.15.0+.
+        type: string
+        default: "11.21.2"
+      install:
+        description: Installs dependencies.
+        type: string
+        default: npm ci
+      checks:
+        description: Shell commands run after install, before publishing (typecheck, tests, build, package checks).
+        type: string
+        default: ""
+    outputs:
+      tag:
+        value: ${{ jobs.preflight.outputs.tag }}
+
+permissions: {}
+
+jobs:
+  settings:
+    name: Settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - id: s
+        env:
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          VERSION_FROM: ${{ inputs.version_from }}
+          NPM_VERSION: ${{ inputs.npm_version }}
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Run the release from $DEFAULT_BRANCH (this run is on $REF)"
+            exit 1
+          fi
+          case "$VERSION_FROM" in
+            package | tag) ;;
+            *) echo "::error::version_from is '$VERSION_FROM'; use package or tag"; exit 1 ;;
+          esac
+          # Oldest npm that can do the job: 11.5.1 for trusted publishing,
+          # 11.15.0 for staging.
+          need=11.5.1
+          [ "$STAGE" = true ] && need=11.15.0
+          if ! printf '%s\n%s\n' "$need" "$NPM_VERSION" | sort -C -V; then
+            echo "::error::npm_version $NPM_VERSION is too old; this release needs $need or later"
+            exit 1
+          fi
+
+  preflight:
+    name: Preflight
+    needs: settings
+    uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
+    with:
+      tag: ${{ inputs.tag }}
+      ci_checks: ${{ inputs.ci_checks }}
+      allow_prerelease: ${{ inputs.allow_prerelease }}
+      skip_semver_check: ${{ inputs.skip_semver_check }}
+      skip_ci_checks: ${{ inputs.skip_ci_checks }}
+      skip_unreleased_check: ${{ inputs.skip_unreleased_check }}
+    permissions:
+      contents: write
+      checks: read
+
+  publish:
+    name: ${{ inputs.stage && 'Stage' || 'Publish' }} to npm
+    needs: preflight
+    if: needs.preflight.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write # trusted publishing
+    env:
+      TAG: ${{ needs.preflight.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.preflight.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node_version }}
+          registry-url: https://registry.npmjs.org
+      - if: inputs.bun_version != ''
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - name: Install npm ${{ inputs.npm_version }}
+        env:
+          NPM_VERSION: ${{ inputs.npm_version }}
+        run: npm install -g "npm@$NPM_VERSION"
+
+      - name: Check package.json
+        id: package
+        env:
+          VERSION_FROM: ${{ inputs.version_from }}
+        run: |
+          set -euo pipefail
+          name=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          repo_url=$(node -p 'const r = require("./package.json").repository; (typeof r === "string" ? r : (r && r.url)) || ""')
+          want=${TAG#v}
+          # Trusted publishing rejects a package whose repository.url isn't
+          # this repo; say so now rather than as ENEEDAUTH at publish time.
+          norm=$(printf '%s' "$repo_url" | sed -E 's#^(git\+)?(https?|ssh|git)://(git@)?##; s#^git@github\.com:#github.com/#; s#\.git$##')
+          if [ "$norm" != "github.com/$GITHUB_REPOSITORY" ]; then
+            echo "::error::package.json repository.url is '$repo_url'; trusted publishing needs it to be https://github.com/$GITHUB_REPOSITORY"
+            exit 1
+          fi
+          if [ "$VERSION_FROM" = package ] && [ "$version" != "$want" ]; then
+            echo "::error::package.json version is $version but the tag is $TAG; bump it to $want (or pass version_from: tag)"
+            exit 1
+          fi
+          if npm view "$name@$want" version >/dev/null 2>&1; then
+            echo "::error::$name@$want is already on npm"
+            exit 1
+          fi
+          case "$want" in
+            *-*) dist_tag=next ;;
+            *) dist_tag=latest ;;
+          esac
+          {
+            echo "name=$name"
+            echo "version=$want"
+            echo "dist_tag=$dist_tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        env:
+          INSTALL: ${{ inputs.install }}
+        run: bash -euo pipefail -c "$INSTALL"
+      - name: Checks
+        if: inputs.checks != ''
+        env:
+          CHECKS: ${{ inputs.checks }}
+        run: bash -euo pipefail -c "$CHECKS"
+
+      # After the checks, which test the tag as committed.
+      - name: Set the version from the tag
+        if: inputs.version_from == 'tag'
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: ${{ inputs.stage && 'Stage' || 'Publish' }} ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}
+        env:
+          STAGE: ${{ inputs.stage }}
+          DIST_TAG: ${{ steps.package.outputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          cmd=(npm publish)
+          [ "$STAGE" = true ] && cmd=(npm stage publish)
+          "${cmd[@]}" --provenance --tag "$DIST_TAG" --ignore-scripts
+          if [ "$STAGE" = true ]; then
+            echo "::notice::Staged; approve it on npmjs.com (2FA) to make it public"
+          fi

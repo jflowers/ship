@@ -101,6 +101,67 @@ release:
     - glob: dist/homebrew/Casks/replicator.rb
 ```
 
+### `npm-release.yml`: npm package, through trusted publishing
+
+1. **Settings**: before anything is tagged, checks the run is on the default
+   branch, `version_from` is `package` or `tag`, and `npm_version` is new
+   enough (11.5.1 to publish, 11.15.0 to stage).
+2. **Preflight** (org-infra): semver, tag uniqueness, CI on HEAD, unreleased
+   commits; creates the tag.
+3. **Publish**: checks out the tag and checks `package.json`:
+   - `repository.url` must be this repo, or trusted publishing fails;
+   - the version must equal the tag (`version_from: package`), unless it's
+     set from the tag (`version_from: tag`);
+   - the version mustn't already be on npm.
+
+   Then it runs `install` and `checks`, and publishes with provenance, or,
+   with `stage: true`, stages the version for a maintainer to approve on
+   npmjs.com. A prerelease (`v1.2.0-rc.1`) goes to the `next` dist-tag, not
+   `latest`.
+
+There's no npm token. npm trusts the *calling* workflow: the trusted
+publisher on npmjs.com names the caller's file (say `publish.yml`), never
+`npm-release.yml`, so a repo keeps its registered file as the caller, and
+renaming it breaks publishing until the trusted publisher is updated. If the
+trusted publisher names a GitHub environment, pass it as `environment`.
+
+Lifecycle scripts don't run at publish (`--ignore-scripts`), so `checks`
+must build whatever the package ships.
+
+A repo's whole `publish.yml`:
+
+```yaml
+name: Publish
+on:
+  workflow_dispatch:
+    inputs:
+      tag: { description: "Release tag (e.g. v0.5.0)", required: true, type: string }
+permissions: {}
+jobs:
+  release:
+    uses: jflowers/ship/.github/workflows/npm-release.yml@<sha> # vX.Y.Z
+    with:
+      tag: ${{ inputs.tag }}
+      ci_checks: '["typecheck and test"]'
+      bun_version: 1.4.4
+      install: bun install --frozen-lockfile
+      checks: |
+        bun run typecheck
+        bun test
+        bun run verify:package
+    permissions:
+      contents: write
+      checks: read
+      id-token: write
+```
+
+Inputs: `tag`, `ci_checks`, `allow_prerelease` (default true),
+`skip_semver_check`, `skip_ci_checks`, `skip_unreleased_check`,
+`version_from` (`package` or `tag`, default `package`), `stage` (default
+false), `environment`, `node_version` (default 24), `bun_version` (empty: no
+Bun), `npm_version` (default 11.21.2), `install` (default `npm ci`) and
+`checks`.
+
 ## Secrets
 
 ship holds no secrets. Each caller passes its own, and
@@ -139,7 +200,7 @@ SHA, never `@main`, and keep `main` protected.
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-secrets-sync.sh
+actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-secrets-sync.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -147,13 +208,15 @@ scripts/test-audit-cask.sh   # macOS
 yq, so the workflow is the only copy): the checksum rewrite and cask patch
 against a real GoReleaser 2.15 cask in `scripts/testdata/`, and the tap push
 retry against a local bare repo. `scripts/test-audit-cask.sh` (macOS) runs
-the audit step on that cask. `scripts/test-secrets-sync.sh` runs the sync
+the audit step on that cask. `scripts/test-npm-steps.sh` runs
+`npm-release.yml`'s settings and `package.json` checks against fixture
+packages and a fake `npm view`. `scripts/test-secrets-sync.sh` runs the sync
 against a fixture config, a fake `HOME` and a fake `gh`.
 
 ## Roadmap
 
 - `formula` support (unbound-force/unbound-force), the post-release install
-  check from gaze, `container`, `npm`/`pypi` publish actions, `mac-app`
+  check from gaze, `container`, `pypi` publishing, `mac-app`
   (from gh-hud)
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
 - `gh ship status | release | secrets`, driven by `repos.yaml`

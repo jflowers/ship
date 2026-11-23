@@ -56,7 +56,7 @@ repos:
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
     workflow: own
-    migrating: https://github.com/unbound-force/replicator/pull/176 # go-release.yml@v0.1.0
+    migrating: https://github.com/unbound-force/replicator/pull/176 # go-release.yml@v0.2.1
     notes: >-
       the live Casks/replicator.rb (0.7.0) has "#{staged_path}" in
       postflight_steps, which Homebrew 7 can't read; the migration PR fixes

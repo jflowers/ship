@@ -8,6 +8,11 @@ whose preflight and GoReleaser workflows this builds on.
 [`repos.yaml`](repos.yaml) lists every repo that publishes something, what it
 publishes, its Homebrew tap, its mise pin, and whether it has migrated.
 
+ship lives in a personal account on purpose. Callers pin it by full commit
+SHA, so the code they run can't change under them. They do depend on this
+account staying available: if it were renamed, deleted or compromised,
+releases would stop until the callers were repointed.
+
 ## Workflows
 
 ### `go-release.yml`: Go CLI, optionally signed for macOS and published as a cask

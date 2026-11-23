@@ -121,5 +121,34 @@ if ! (cd "$t/tap" && GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_
   ok "conflicting cask change fails without overwriting"
 else fail "conflicting cask change fails without overwriting"; fi
 
+# --- settings: which signing secrets were passed ---------------------------
+settings=$(yq '.jobs.settings.steps[] | select(.id == "s") | .run' "$wf")
+signing="MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID"
+# runset <names passed...>: runs the step with those HAS_* true; output in $t/out
+runset() {
+  local envs=(TAP="${TAP-}" REPO=gaze BINARY= PREFIX= CASK= GITHUB_OUTPUT="$t/out"
+    HAS_HOMEBREW_TAP_TOKEN="${HAS_TOKEN:-true}")
+  local n
+  for n in $signing; do envs+=("HAS_$n=false"); done
+  for n in "$@"; do envs+=("HAS_$n=true"); done
+  : > "$t/out"
+  env "${envs[@]}" bash -c "$settings" > "$t/err" 2>&1
+}
+
+# shellcheck disable=SC2086 # word-split on purpose
+if runset $signing && grep -qx 'sign=true' "$t/out" && grep -qx 'cask=gaze' "$t/out"; then
+  ok "all signing secrets: sign"
+else fail "all signing secrets: sign"; fi
+if runset && grep -qx 'sign=false' "$t/out" && grep -q 'ship unsigned' "$t/err"; then
+  ok "no signing secrets: unsigned, with a notice"
+else fail "no signing secrets: unsigned, with a notice"; fi
+if ! runset MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY &&
+  grep -q 'missing: MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID\.' "$t/err" && [ ! -s "$t/out" ]; then
+  ok "some signing secrets: fails, naming the missing ones"
+else fail "some signing secrets: fails, naming the missing ones"; fi
+if ! TAP=o/tap HAS_TOKEN=false runset && grep -q "HOMEBREW_TAP_TOKEN wasn't passed" "$t/err"; then
+  ok "a tap without a token fails"
+else fail "a tap without a token fails"; fi
+
 if [ "$fails" -ne 0 ]; then echo "$fails failed"; exit 1; fi
 echo "all passed"

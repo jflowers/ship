@@ -12,12 +12,17 @@ publishes, its Homebrew tap, its mise pin, and whether it has migrated.
 
 ### `go-release.yml`: Go CLI, optionally signed for macOS and published as a cask
 
+1. **Settings**: before anything is tagged, checks the secrets. Signing needs
+   `MACOS_SIGN_P12`, `MACOS_SIGN_PASSWORD` and the three `MACOS_NOTARY_*`;
+   none of them means an unsigned release, and some but not all fails the
+   run, naming the missing ones. A `tap` without `HOMEBREW_TAP_TOKEN` fails
+   too.
 1. **Preflight** (org-infra): semver, tag uniqueness, CI on HEAD, unreleased
    commits; creates the tag.
 2. **GoReleaser** (org-infra): archives, checksums, cosign, SBOMs.
 3. **Sign + notarize macOS**: every `<prefix>_*_darwin_*.tar.gz` is signed with
    the Developer ID, notarized, re-uploaded, and its line in `checksums.txt`
-   rewritten. Skipped when `MACOS_SIGN_P12` isn't passed.
+   rewritten. Skipped when no signing secrets are passed.
 4. **Publish cask**: every `sha256` in the cask is set from the final
    `checksums.txt`, the cask is committed in a clone of the tap and checked
    with `brew audit --cask --strict` (on macOS, through a throwaway tap), then

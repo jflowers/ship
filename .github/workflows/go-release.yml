@@ -2,13 +2,16 @@
 # ===============================================
 # A repo's own release.yml calls this with a tag. In order:
 #
+#   settings      checks the secrets before anything is tagged: signing needs
+#                 all five MACOS_* secrets (MACOS_SIGN_IDENTITY optional) or
+#                 none; some but not all fails, naming the missing ones
 #   preflight     org-infra: semver, tag uniqueness, CI on HEAD, unreleased
 #                 commits; creates the annotated tag
 #   release       org-infra: GoReleaser (archives, checksums, cosign, SBOMs,
 #                 and the cask as a release asset when the repo makes one)
 #   sign-macos    Developer ID signing + notarization of every darwin archive,
 #                 re-uploaded with checksums.txt rewritten to match. Skipped
-#                 (not failed) when MACOS_SIGN_P12 isn't passed.
+#                 (not failed) when no signing secrets are passed.
 #   publish-cask  sets every sha256 in the cask from the final checksums.txt
 #                 and pushes it to the tap. Only when `tap` is set.
 #
@@ -67,7 +70,7 @@ on:
         value: ${{ jobs.preflight.outputs.tag }}
     secrets:
       MACOS_SIGN_P12:
-        description: Developer ID Application certificate + key, base64 .p12. Absent = no signing.
+        description: Developer ID Application certificate + key, base64 .p12. Signing needs it, the password and the three MACOS_NOTARY_* secrets; none of them = unsigned.
         required: false
       MACOS_SIGN_PASSWORD:
         required: false
@@ -88,8 +91,62 @@ on:
 permissions: {}
 
 jobs:
+  # Secrets can't appear in a job-level `if`, so a tiny job reports them. It
+  # runs first so a misconfigured caller fails before the tag exists.
+  settings:
+    name: Settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      sign: ${{ steps.s.outputs.sign }}
+      binary: ${{ steps.s.outputs.binary }}
+      prefix: ${{ steps.s.outputs.prefix }}
+      cask: ${{ steps.s.outputs.cask }}
+    steps:
+      - id: s
+        env:
+          HAS_MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 != '' }}
+          HAS_MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD != '' }}
+          HAS_MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY != '' }}
+          HAS_MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID != '' }}
+          HAS_MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID != '' }}
+          HAS_HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+          TAP: ${{ inputs.tap }}
+          REPO: ${{ github.event.repository.name }}
+          BINARY: ${{ inputs.binary }}
+          PREFIX: ${{ inputs.archive_prefix }}
+          CASK: ${{ inputs.cask }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAP" ] && [ "$HAS_HOMEBREW_TAP_TOKEN" != true ]; then
+            echo "::error::tap is $TAP but HOMEBREW_TAP_TOKEN wasn't passed"
+            exit 1
+          fi
+          have=() missing=()
+          for n in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID; do
+            v=HAS_$n
+            if [ "${!v}" = true ]; then have+=("$n"); else missing+=("$n"); fi
+          done
+          if [ "${#have[@]}" -eq 0 ]; then
+            sign=false
+            echo "::notice::No signing secrets passed: darwin archives ship unsigned"
+          elif [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Signing secrets incomplete, missing: ${missing[*]}. Pass all of them to sign, or none to ship unsigned."
+            exit 1
+          else
+            sign=true
+          fi
+          {
+            echo "sign=$sign"
+            echo "binary=${BINARY:-$REPO}"
+            echo "prefix=${PREFIX:-$REPO}"
+            echo "cask=${CASK:-$REPO}"
+          } >> "$GITHUB_OUTPUT"
+
   preflight:
     name: Preflight
+    needs: settings
     uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
     with:
       tag: ${{ inputs.tag }}
@@ -112,43 +169,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-
-  # Secrets can't appear in a job-level `if`, so a tiny job reports them.
-  settings:
-    name: Settings
-    needs: preflight
-    if: needs.preflight.outputs.tag != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    outputs:
-      sign: ${{ steps.s.outputs.sign }}
-      binary: ${{ steps.s.outputs.binary }}
-      prefix: ${{ steps.s.outputs.prefix }}
-      cask: ${{ steps.s.outputs.cask }}
-    steps:
-      - id: s
-        env:
-          HAS_P12: ${{ secrets.MACOS_SIGN_P12 != '' }}
-          HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
-          TAP: ${{ inputs.tap }}
-          REPO: ${{ github.event.repository.name }}
-          BINARY: ${{ inputs.binary }}
-          PREFIX: ${{ inputs.archive_prefix }}
-          CASK: ${{ inputs.cask }}
-        run: |
-          set -euo pipefail
-          if [ -n "$TAP" ] && [ "$HAS_TAP_TOKEN" != true ]; then
-            echo "::error::tap is $TAP but HOMEBREW_TAP_TOKEN wasn't passed"
-            exit 1
-          fi
-          [ "$HAS_P12" = true ] || echo "::notice::MACOS_SIGN_P12 not passed: darwin archives ship unsigned"
-          {
-            echo "sign=$HAS_P12"
-            echo "binary=${BINARY:-$REPO}"
-            echo "prefix=${PREFIX:-$REPO}"
-            echo "cask=${CASK:-$REPO}"
-          } >> "$GITHUB_OUTPUT"
 
   sign-macos:
     name: Sign + notarize macOS

@@ -55,18 +55,16 @@ repos:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: own
-    migrating: https://github.com/unbound-force/replicator/pull/176 # go-release.yml@v0.2.1
+    workflow: go-release.yml@v0.2.1 # unbound-force/replicator#176
     notes: >-
       the live Casks/replicator.rb (0.7.0) has "#{staged_path}" in
-      postflight_steps, which Homebrew 7 can't read; the migration PR fixes
-      it, and the next release publishes the fix
+      postflight_steps, which Homebrew 7 can't read; main has the fix, and
+      the next release publishes it
   unbound-force/dewey:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: own
-    migrating: https://github.com/unbound-force/dewey/pull/246 # go-release.yml@v0.2.1
+    workflow: go-release.yml@v0.2.1 # unbound-force/dewey#246
     notes: >-
       its cask uses the deprecated `postflight do` hook (a hard error in
       Homebrew after 2027-12-11); move it to postflight_steps like replicator
@@ -75,8 +73,7 @@ repos:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: own
-    migrating: https://github.com/unbound-force/gaze/pull/362 # go-release.yml@v0.2.1
+    workflow: go-release.yml@v0.2.1 # unbound-force/gaze#362
     notes: >-
       its tap token is the repo secret HOMEBREW_TAP_GITHUB_TOKEN, mapped to
       HOMEBREW_TAP_TOKEN in its caller (the sync leaves it alone); keeps

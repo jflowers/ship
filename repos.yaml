@@ -143,3 +143,35 @@ repos:
     notes: >-
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
+  jflowers/opencode-session-search:
+    kinds: [npm]
+    workflow: own
+    migrating: https://github.com/jflowers/opencode-session-search/pull/2 # npm-release.yml@v0.4.0
+    notes: >-
+      publishes as opencode-session-searcher (the unscoped name is
+      taken); not on npm yet: first publish 0.1.0 by hand, add the
+      trusted publisher (publish.yml), then dispatch v0.1.0
+  jflowers/opencode-session-notes:
+    kinds: [npm]
+    workflow: own
+    migrating: https://github.com/jflowers/opencode-session-notes/pull/3 # npm-release.yml@v0.4.0
+    notes: >-
+      not on npm yet: first publish 0.1.0 by hand, add the trusted
+      publisher (publish.yml), then dispatch v0.1.0
+  jflowers/opencode-research-harness:
+    kinds: [npm]
+    workflow: own
+    migrating: https://github.com/jflowers/opencode-research-harness/pull/11 # npm-release.yml@v0.4.0
+    notes: >-
+      private repo: make public before the first release (no
+      provenance from private repos); not on npm yet: first publish
+      0.1.0 by hand, add the trusted publisher (publish.yml), then
+      dispatch v0.1.0
+  jflowers/opencode-debug-harness:
+    kinds: [npm]
+    workflow: own
+    migrating: https://github.com/jflowers/opencode-debug-harness/pull/3 # npm-release.yml@v0.4.0
+    notes: >-
+      stacked on #1 (feat/phase-1); private repo: make public before
+      the first release; not on npm yet: first publish 0.1.0 by hand,
+      add the trusted publisher (publish.yml), then dispatch v0.1.0

@@ -4,9 +4,10 @@
 # dispatch, plus a 2FA approval on npmjs.com when the version is staged.
 # In order:
 #
-#   settings        checks the inputs and that the run is on the default
-#                   branch, and decides whether to stage, before anything is
-#                   tagged
+#   settings        before anything is tagged: checks the inputs and that the
+#                   run is on the default branch, decides whether to stage,
+#                   and checks package.json (repository.url, and the version
+#                   against the tag) on the commit about to be tagged
 #   preflight       org-infra: semver, tag uniqueness, CI on HEAD,
 #                   unreleased commits; creates the annotated tag
 #   publish         checks out the tag, checks package.json against the tag
@@ -114,7 +115,8 @@ jobs:
     name: Settings
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read # the package.json check
     outputs:
       stage: ${{ steps.s.outputs.stage }}
     steps:
@@ -155,6 +157,33 @@ jobs:
             echo "::notice::The version will be staged; approve it on npmjs.com (2FA) to make it public"
           fi
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
+
+      # The commit preflight is about to tag. A mismatch here fails the run
+      # before anything is tagged, so the same tag can be dispatched again
+      # once it's fixed. publish repeats these checks against the tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check package.json
+        id: package
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION_FROM: ${{ inputs.version_from }}
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./package.json").version')
+          repo_url=$(node -p 'const r = require("./package.json").repository; (typeof r === "string" ? r : (r && r.url)) || ""')
+          want=${TAG#v}
+          norm=$(printf '%s' "$repo_url" | sed -E 's#^(git\+)?(https?|ssh|git)://(git@)?##; s#^git@github\.com:#github.com/#; s#\.git$##')
+          if [ "$norm" != "github.com/$GITHUB_REPOSITORY" ]; then
+            echo "::error::package.json repository.url is '$repo_url'; trusted publishing needs it to be https://github.com/$GITHUB_REPOSITORY. Nothing was tagged."
+            exit 1
+          fi
+          if [ "$VERSION_FROM" = package ] && [ "$version" != "$want" ]; then
+            echo "::error::package.json version is $version but the tag is $TAG; bump it to $want (or pass version_from: tag), then dispatch $TAG again. Nothing was tagged."
+            exit 1
+          fi
 
   preflight:
     name: Preflight

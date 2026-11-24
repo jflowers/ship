@@ -109,16 +109,20 @@ version is staged.
 1. **Settings**: before anything is tagged, checks the run is on the default
    branch and `version_from` is `package` or `tag`, decides whether to stage
    (below), and checks `npm_version` is new enough (11.5.1 to publish,
-   11.15.0 to stage).
-2. **Preflight** (org-infra): semver, tag uniqueness, CI on HEAD, unreleased
-   commits; creates the tag.
-3. **Publish**: checks out the tag and checks `package.json`:
+   11.15.0 to stage). Then it checks `package.json` on the commit about to
+   be tagged:
    - `repository.url` must be this repo, or trusted publishing fails;
    - the version must equal the tag (`version_from: package`), unless it's
-     set from the tag (`version_from: tag`);
-   - if the version is already on npm (an earlier run, approved), the rest
-     of the job is skipped and the run goes on to the GitHub release, so a
-     re-run is safe.
+     set from the tag (`version_from: tag`).
+
+   A forgotten bump fails here, with nothing tagged: bump it and dispatch
+   the same tag again.
+2. **Preflight** (org-infra): semver, tag uniqueness, CI on HEAD, unreleased
+   commits; creates the tag.
+3. **Publish**: checks out the tag and checks `package.json` again. If the
+   version is already on npm (an earlier run, approved), the rest of the
+   job is skipped and the run goes on to the GitHub release, so a re-run is
+   safe.
 
    Then it runs `install` and `checks`, and publishes with provenance, or
    stages the version for a maintainer to approve on npmjs.com. A prerelease
@@ -223,8 +227,9 @@ yq, so the workflow is the only copy): the checksum rewrite and cask patch
 against a real GoReleaser 2.15 cask in `scripts/testdata/`, and the tap push
 retry against a local bare repo. `scripts/test-audit-cask.sh` (macOS) runs
 the audit step on that cask. `scripts/test-npm-steps.sh` runs
-`npm-release.yml`'s settings, `package.json` and GitHub release steps
-against fixture packages, a fake `npm view` and a fake `gh`. `scripts/test-secrets-sync.sh` runs the sync
+`npm-release.yml`'s settings, both `package.json` checks and the GitHub
+release step against fixture packages, a fake `npm view` and a fake `gh`.
+`scripts/test-secrets-sync.sh` runs the sync
 against a fixture config, a fake `HOME` and a fake `gh`.
 
 ## Roadmap

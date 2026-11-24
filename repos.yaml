@@ -133,11 +133,13 @@ repos:
     mise: go:github.com/jflowers/ghws/cmd/ghws
   jflowers/opencode-supervisor:
     kinds: [npm]
-    workflow: own
-    migrating: https://github.com/jflowers/opencode-supervisor/pull/85 # npm-release.yml@v0.4.0
-    notes: npm's trusted publisher names publish.yml, which stays as the caller
+    workflow: npm-release.yml@v0.4.0 # jflowers/opencode-supervisor#85
+    notes: >-
+      published directly (personal account, stage: auto); npm's trusted
+      publisher names publish.yml, which stays as the caller
   jflowers/opencode-auto-question:
     kinds: [npm]
-    workflow: own
-    migrating: https://github.com/jflowers/opencode-auto-question/pull/42 # npm-release.yml@v0.4.0
-    notes: npm's trusted publisher names publish.yml, which stays as the caller
+    workflow: npm-release.yml@v0.4.0 # jflowers/opencode-auto-question#42
+    notes: >-
+      published directly (personal account, stage: auto); npm's trusted
+      publisher names publish.yml, which stays as the caller

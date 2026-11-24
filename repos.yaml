@@ -104,8 +104,7 @@ repos:
     workflow: own # PyPI trusted publishing must stay in the caller's job
   zero-dot-force/reading-stone:
     kinds: [npm]
-    workflow: npm-release.yml@v0.4.0 # zero-dot-force/reading-stone#34, #37
-    migrating: https://github.com/zero-dot-force/reading-stone/pull/39 # npm-release.yml@v0.5.0
+    workflow: npm-release.yml@v0.5.0 # zero-dot-force/reading-stone#34, #37, #39
     notes: >-
       always staged (stage: "true"; approved on npmjs.com with 2FA), version
       taken from the tag; npm's trusted publisher names release.yml and the

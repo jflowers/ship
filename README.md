@@ -201,6 +201,10 @@ scripts/npm-bootstrap.sh --apply                                 # all of them
 scripts/npm-bootstrap.sh --apply jflowers/opencode-session-notes # just one repo (or owner)
 ```
 
+Before it changes anything, `--apply` checks `npm whoami` and stops if npm
+isn't logged in: without a login, npm answers a new package's publish with
+a misleading 404. Run `npm login` and try again.
+
 npm asks for 2FA on each publish and on the first `npm trust`, where the
 web prompt's "skip two-factor authentication for the next 5 minutes" covers
 the later `npm trust` calls. A repo is skipped, with the reason, if it's private (npm gives no

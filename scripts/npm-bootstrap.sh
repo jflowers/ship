@@ -158,8 +158,17 @@ fi
 ((ready)) || exit 0
 
 # --- apply --------------------------------------------------------------
+# Without a valid login npm answers a new package's publish with 404, not
+# 401, which reads like a missing package. Check first, before any clone.
+if ! user=$(npm whoami 2>/dev/null); then
+  echo "npm-bootstrap: npm isn't logged in (npm whoami failed); run npm login, then this again" >&2
+  exit 1
+fi
+echo "Publishing as npm user $user"
 failed=0
-while IFS='|' read -r repo branch name version caller env stage steps; do
+# The plan comes in on fd 3 so stdin stays your terminal: npm only waits
+# for the 2FA web login when stdin is a TTY, and fails with EOTP otherwise.
+while IFS='|' read -r repo branch name version caller env stage steps <&3; do
   echo
   echo "== $repo ($name@$version)"
   if [[ $steps == all ]]; then
@@ -211,6 +220,6 @@ while IFS='|' read -r repo branch name version caller env stage steps; do
     failed=$((failed + 1)); continue
   fi
   echo "Dispatched v$version: gh run list -R $repo -w $caller -L 1"
-done <"$tmp/plan"
+done 3<"$tmp/plan"
 
 ((failed == 0)) || { echo "$failed failed"; exit 1; }

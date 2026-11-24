@@ -98,10 +98,12 @@ cat >"$t/bin/npm" <<'EOF'
 #!/usr/bin/env bash
 log() { echo "npm $*" >>"$LOG"; }
 case $1 in
+  whoami) [ -z "${LOGGED_OUT:-}" ] && echo tester ;;
   view) grep -qxF "$2" "$F/npm-published" ;;
   publish)
     n=$(yq -r .name package.json); v=$(yq -r .version package.json)
-    log "publish $n@$v ${*:2}"; printf '%s\n' "$n" "$n@$v" >>"$F/npm-published" ;;
+    # stdin must be the caller's (npm prompts for 2FA there), not the plan
+    log "publish $n@$v ${*:2}"; log "stdin: $(cat)"; printf '%s\n' "$n" "$n@$v" >>"$F/npm-published" ;;
   stage) log "stage ${*:2} ($(yq -r .name package.json))" ;;
   trust)
     case $2 in
@@ -116,8 +118,9 @@ chmod +x "$t/bin/gh" "$t/bin/npm"
 run() { # [args]: output in $t/out, calls in $t/log
   : >"$t/log"
   PATH="$t/bin:$PATH" F=$F LOG=$t/log SHIP_REPOS=$t/repos.yaml SHIP_NPM=$t/bin/npm \
-    SHIP_POLL_SECONDS=0 SHIP_POLLS=2 "$here/npm-bootstrap.sh" "$@" >"$t/out" 2>&1
+    SHIP_POLL_SECONDS=0 SHIP_POLLS=2 "$here/npm-bootstrap.sh" "$@" <"$t/stdin" >"$t/out" 2>&1
 }
+echo from-the-terminal >"$t/stdin"
 has() { grep -qF -- "$1" "$2"; }
 
 # --- plan -----------------------------------------------------------------
@@ -140,6 +143,10 @@ if run acme/new && has "1 ready, 0 skipped" "$t/out"; then ok "plan: a repo targ
 if run org && has "2 ready, 0 skipped" "$t/out"; then ok "plan: an owner target narrows it"; else fail "plan: an owner target narrows it"; fi
 
 # --- apply ----------------------------------------------------------------
+if ! LOGGED_OUT=1 run --apply acme/new && has "run npm login" "$t/out" && [ ! -s "$t/log" ]; then
+  ok "apply: stops before anything if npm isn't logged in"
+else fail "apply: stops before anything if npm isn't logged in"; fi
+
 run --apply acme/new || true
 expect_log() { # <name> <lines...>
   local name=$1 l; shift
@@ -151,6 +158,7 @@ expect_log "publishes, trusts, dispatches" \
   "npm publish new@0.1.0 --access public --ignore-scripts" \
   "npm trust github new --repo acme/new --file publish.yml -y --allow-publish" \
   "gh workflow run publish.yml -R acme/new --ref main -f tag=v0.1.0"
+if has "stdin: from-the-terminal" "$t/log"; then ok "apply: npm gets the caller's stdin for its 2FA prompt"; else fail "apply: npm gets the caller's stdin for its 2FA prompt"; fi
 if [ "$(grep -n 'publish new@' "$t/log" | cut -d: -f1)" -lt "$(grep -n 'trust github new' "$t/log" | cut -d: -f1)" ] &&
   [ "$(grep -n 'trust github new' "$t/log" | cut -d: -f1)" -lt "$(grep -n 'workflow run' "$t/log" | cut -d: -f1)" ]; then
   ok "apply: in that order"

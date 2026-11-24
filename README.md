@@ -180,6 +180,37 @@ Inputs: `tag`, `ci_checks`, `allow_prerelease` (default true),
 `environment`, `node_version` (default 24), `bun_version` (empty: no Bun),
 `npm_version` (default 11.21.2), `install` (default `npm ci`) and `checks`.
 
+**A package's first release.** npm only accepts a trusted publisher for a
+package that already exists, so the first version can't come from this
+workflow. [`scripts/npm-bootstrap.sh`](scripts/npm-bootstrap.sh) does it
+for every npm repo in `repos.yaml` whose package isn't on npm yet:
+
+1. publishes `package.json`'s version from a fresh clone of the default
+   branch (staged instead, in an organization), which asks for your 2FA;
+2. waits until the registry serves it;
+3. adds the trusted publisher with `npm trust github`, naming the repo's
+   caller workflow and its `environment`, allowing publishing or staging
+   to match `stage`;
+4. dispatches the caller with the tag. Preflight tags it, the publish is
+   skipped because the version is on npm, and the GitHub release is
+   created.
+
+```bash
+scripts/npm-bootstrap.sh                                         # plan: what's ready, and why the rest isn't
+scripts/npm-bootstrap.sh --apply                                 # all of them
+scripts/npm-bootstrap.sh --apply jflowers/opencode-session-notes # just one repo (or owner)
+```
+
+npm asks for 2FA on each publish and on the first `npm trust`, where the
+web prompt's "skip two-factor authentication for the next 5 minutes" covers
+the later `npm trust` calls. A repo is skipped, with the reason, if it's private (npm gives no
+provenance from a private repo), if no workflow on its default branch calls
+`npm-release.yml`, if `repository.url` isn't the repo, or if it builds at
+publish time (publish that one's first version by hand). A staged package
+stops after staging: approve it on npmjs.com and run the script again,
+which finishes it with steps 3 and 4. So does any package whose version is
+on npm but has no tag yet.
+
 ## Secrets
 
 ship holds no secrets. Each caller passes its own, and
@@ -218,7 +249,7 @@ SHA, never `@main`, and keep `main` protected.
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-secrets-sync.sh
+actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -229,6 +260,8 @@ retry against a local bare repo. `scripts/test-audit-cask.sh` (macOS) runs
 the audit step on that cask. `scripts/test-npm-steps.sh` runs
 `npm-release.yml`'s settings, both `package.json` checks and the GitHub
 release step against fixture packages, a fake `npm view` and a fake `gh`.
+`scripts/test-npm-bootstrap.sh` runs the bootstrap's plan and `--apply`
+against fixture repos, a fake `gh` and a fake `npm`.
 `scripts/test-secrets-sync.sh` runs the sync
 against a fixture config, a fake `HOME` and a fake `gh`.
 

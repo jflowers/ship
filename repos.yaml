@@ -148,26 +148,23 @@ repos:
     workflow: npm-release.yml@v0.5.0 # jflowers/opencode-session-search#2, #4
     notes: >-
       publishes as opencode-session-searcher (the unscoped name is
-      taken); not on npm yet: first publish 0.1.0 by hand, add the
-      trusted publisher (publish.yml), then dispatch v0.1.0
+      taken); 0.1.0 bootstrapped with scripts/npm-bootstrap.sh
+      (trusted publisher publish.yml)
   jflowers/opencode-session-notes:
     kinds: [npm]
     workflow: npm-release.yml@v0.5.0 # jflowers/opencode-session-notes#3, #5
     notes: >-
-      not on npm yet: first publish 0.1.0 by hand, add the trusted
-      publisher (publish.yml), then dispatch v0.1.0
+      0.1.0 bootstrapped with scripts/npm-bootstrap.sh (trusted
+      publisher publish.yml)
   jflowers/opencode-research-harness:
     kinds: [npm]
     workflow: npm-release.yml@v0.5.0 # jflowers/opencode-research-harness#11, #13
     notes: >-
-      private repo: make public before the first release (no
-      provenance from private repos); not on npm yet: first publish
-      0.1.0 by hand, add the trusted publisher (publish.yml), then
-      dispatch v0.1.0
+      made public for provenance; 0.1.0 bootstrapped with
+      scripts/npm-bootstrap.sh (trusted publisher publish.yml)
   jflowers/opencode-debug-harness:
     kinds: [npm]
     workflow: npm-release.yml@v0.5.0 # jflowers/opencode-debug-harness#1, #5
     notes: >-
-      #3 merged into feat/phase-1, so it reaches main with #1; private repo: make public before
-      the first release; not on npm yet: first publish 0.1.0 by hand,
-      add the trusted publisher (publish.yml), then dispatch v0.1.0
+      made public for provenance; 0.1.0 bootstrapped with
+      scripts/npm-bootstrap.sh (trusted publisher publish.yml)

@@ -8,9 +8,10 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 wf=$here/../.github/workflows/npm-release.yml
 settings=$(yq '.jobs.settings.steps[] | select(.id == "s") | .run' "$wf")
+early=$(yq '.jobs.settings.steps[] | select(.id == "package") | .run' "$wf")
 package=$(yq '.jobs.publish.steps[] | select(.id == "package") | .run' "$wf")
 release=$(yq '.jobs.github-release.steps[] | select(.id == "release") | .run' "$wf")
-[ -n "$settings" ] && [ -n "$package" ] && [ -n "$release" ] || { echo "steps missing from $wf"; exit 1; }
+[ -n "$settings" ] && [ -n "$early" ] && [ -n "$package" ] && [ -n "$release" ] || { echo "steps missing from $wf"; exit 1; }
 
 fails=0
 t=$(mktemp -d)
@@ -104,6 +105,28 @@ expect_package pass "repository as git+ssh://git@" v1.2.3 package "$(pkg 1.2.3 '
 expect_package fail "repository is another repo" v1.2.3 package "$(pkg 1.2.3 '{"url": "git+https://github.com/acme/other.git"}')"
 expect_package fail "repository is a fork's prefix" v1.2.3 package "$(pkg 1.2.3 '{"url": "git+https://github.com/acme/widget-fork.git"}')"
 expect_package fail "no repository" v1.2.3 package '{"name": "widget", "version": "1.2.3"}'
+
+# settings' package.json check: the same rules, on the commit about to be
+# tagged, before preflight. <want> <name> <tag> <version_from> <package.json>
+expect_early() {
+  local want=$1 name=$2 got
+  printf '%s\n' "$5" > "$t/pkg/package.json"
+  if (cd "$t/pkg" && GITHUB_REPOSITORY=acme/widget TAG=$3 VERSION_FROM=$4 \
+    bash -c "$early") > "$t/err" 2>&1; then got=pass; else got=fail; fi
+  if [ "$got" = "$want" ]; then ok "settings package.json: $name"
+  else fail "settings package.json: $name (got $got)"; fi
+}
+expect_early pass "version matches the tag" v1.2.3 package "$(pkg 1.2.3 "$https")"
+expect_early fail "version not bumped for the tag" v1.3.0 package "$(pkg 1.2.3 "$https")"
+expect_early pass "version from the tag ignores the placeholder" v0.3.0 tag "$(pkg 0.0.0-development "$https")"
+expect_early pass "repository as git@github.com:" v1.2.3 package "$(pkg 1.2.3 '{"url": "git@github.com:acme/widget.git"}')"
+expect_early fail "repository is another repo" v1.2.3 package "$(pkg 1.2.3 '{"url": "git+https://github.com/acme/other.git"}')"
+expect_early fail "repository is another repo, version from the tag" v1.2.3 tag "$(pkg 0.0.0-development '{"url": "git+https://github.com/acme/other.git"}')"
+expect_early fail "no repository" v1.2.3 package '{"name": "widget", "version": "1.2.3"}'
+if expect_early fail "says nothing was tagged" v1.3.0 package "$(pkg 1.2.3 "$https")" >/dev/null && grep -q "Nothing was tagged" "$t/err"; then
+  ok "settings package.json: the error says nothing was tagged"
+else fail "settings package.json: the error says nothing was tagged"; fi
+
 echo "widget@1.2.3" > "$t/published"
 expect_package pass "version already on npm is skipped, not failed" v1.2.3 package "$(pkg 1.2.3 "$https")" "published=true"
 expect_package pass "only that version is taken" v1.2.4 package "$(pkg 1.2.4 "$https")" "published=false"

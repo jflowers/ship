@@ -75,9 +75,8 @@ repos:
     tap: unbound-force/homebrew-tap
     workflow: go-release.yml@v0.9.0 # unbound-force/replicator#176, #197
     notes: >-
-      the live Casks/replicator.rb (0.7.0) has "#{staged_path}" in
-      postflight_steps, which Homebrew 7 can't read; main has the fix, and
-      the next release publishes it
+      its cask's postflight_steps come from a custom_block (the literal
+      {{staged_path}} Homebrew 7 needs), live in the tap since v0.7.1
     deps: deps-automerge.yml@v0.9.0 # unbound-force/replicator#199
   unbound-force/dewey:
     kinds: [go-cli, cask]
@@ -85,8 +84,9 @@ repos:
     tap: unbound-force/homebrew-tap
     workflow: go-release.yml@v0.9.0 # unbound-force/dewey#246, #269
     notes: >-
-      its cask uses the deprecated `postflight do` hook (a hard error in
-      Homebrew after 2027-12-11); move it to postflight_steps like replicator
+      its cask's postflight_steps come from a custom_block (dewey#273); the
+      tap's Casks/dewey.rb keeps the deprecated `postflight do` hook (a hard
+      error in Homebrew after 2027-12-11) until the next release
     mise: go:github.com/unbound-force/dewey/v3
     deps: deps-automerge.yml@v0.8.0 # unbound-force/dewey#257
   unbound-force/gaze:

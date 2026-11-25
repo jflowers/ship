@@ -398,6 +398,39 @@ repository admins bypass, so you can still push to the default branch. A
 repo without `checks:` keeps the rulesets and branch protection it has; the
 plan shows them.
 
+### `container-image.yml`: a multi-arch container image
+
+1. **Settings**: `image` is `registry/path` with no tag, every tag is valid,
+   and a `push` has `REGISTRY_USERNAME` and `REGISTRY_PASSWORD`.
+2. **Build** (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`, no
+   QEMU): `podman build`, then the caller's `smoke` commands with `$IMAGE`
+   set to the local image.
+3. **Push manifest** (only with `push: true`): logs in to the image's
+   registry with the password on stdin, and pushes one manifest for both
+   architectures under every tag in `tags`.
+
+It isn't a release: there's no tag or preflight. Pass
+`push: ${{ github.event_name != 'pull_request' }}` so pull requests build
+and smoke-test without pushing. unbound-force/containerfile's dev image:
+
+```yaml
+jobs:
+  image:
+    uses: jflowers/ship/.github/workflows/container-image.yml@<sha> # vX.Y.Z
+    with:
+      image: quay.io/unbound-force/opencode-dev
+      tags: ${{ github.ref_type == 'tag' && format('{0} latest', github.ref_name) || 'latest' }}
+      push: ${{ github.event_name == 'push' }}
+      smoke: |
+        podman run --rm "$IMAGE" uf --version
+        test "$(podman run --rm --entrypoint whoami "$IMAGE")" = dev
+    permissions:
+      contents: read
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+```
+
 ## Secrets
 
 ship holds no secrets. Each caller passes its own, and
@@ -437,7 +470,7 @@ SHA, never `@main`, and keep `main` protected.
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh
+actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -452,6 +485,7 @@ release step against fixture packages, a fake `npm view` and a fake `gh`.
 writer and `tag-release.yml`'s branch check, and checks that the signing
 import and tap steps it shares with `go-release.yml` haven't drifted;
 `test-audit-cask.sh` also audits a cask it writes.
+`scripts/test-container-steps.sh` runs `container-image.yml`'s settings check.
 `scripts/test-npm-bootstrap.sh` runs the bootstrap's plan and `--apply`
 against fixture repos, a fake `gh` and a fake `npm`.
 `scripts/test-secrets-sync.sh` runs the sync
@@ -462,8 +496,7 @@ steps and `settings-sync.sh` against a fake `gh`.
 ## Roadmap
 
 - `formula` support (unbound-force/unbound-force), the post-release install
-  check from gaze, `container`, `pypi` publishing
-  (from gh-hud)
+  check from gaze, `pypi` publishing
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
 - `gh ship status | release | secrets`, driven by `repos.yaml`
   (`secrets-sync.sh` becomes `gh ship secrets`)

@@ -317,6 +317,87 @@ jobs:
     # ... checks out refs/tags/${{ needs.release.outputs.tag }}, builds the APK, uploads it
 ```
 
+### `deps-automerge.yml` and `renovate/automerge.json`: our own updates merge themselves
+
+complytime/org-infra's `ci_dependencies.yml` policy, merged by rebase.
+Patch and minor updates of packages from our own orgs (jflowers,
+unbound-force, zero-dot-force: their actions and reusable workflows, Go
+modules, `@scope` npm packages) merge themselves once the required checks
+pass. That includes the bumps to a repo's own `jflowers/ship/...@<sha>`
+pins, so each repo picks up a ship release by itself. Third-party
+updates wait a day and a person merges them. Majors, and updates without a
+semver type, always wait for a person.
+
+**Dependabot.** Add a caller and a cooldown. The cooldown replaces
+org-infra's 24h release-age check: Dependabot doesn't open a PR for a
+third-party release younger than that. Our orgs are excluded, as org-infra
+skips the check for them.
+
+```yaml
+# .github/workflows/dependabot-automerge.yml
+name: Dependabot auto-merge
+on: pull_request
+permissions: {}
+jobs:
+  automerge:
+    uses: jflowers/ship/.github/workflows/deps-automerge.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: write
+      pull-requests: write
+```
+
+```yaml
+# .github/dependabot.yml, on each update (Go modules: github.com/jflowers/* ...)
+    cooldown:
+      default-days: 1
+      exclude: ["jflowers/*", "unbound-force/*", "zero-dot-force/*"]
+```
+
+The job runs only for Dependabot's own PRs from a branch in the repo. It
+reads the update type and the dependencies with
+`dependabot/fetch-metadata`, then, for a safe update, blocks on
+`actions/dependency-review-action`. For a safe update from our orgs it
+checks that the repo allows auto-merge and that the base branch requires at
+least one status check, then runs `gh pr merge --auto --rebase`. Without a
+required check auto-merge would merge before CI, so the job fails instead.
+A group with any third-party dependency in it is third-party.
+
+Inputs: `owners` (our three orgs), `merge_method` (`rebase`),
+`max_update_type` (`minor`), `dependency_review` (true; it needs the
+dependency graph, which `settings-sync.sh` turns on), `approve` (false;
+approves every safe update, as org-infra does, for a branch that requires a
+review and with "Allow GitHub Actions to create and approve pull requests"
+on). A merge made with `GITHUB_TOKEN` starts no `push` workflows on the
+default branch.
+
+**Renovate.** Extend the preset:
+
+```json
+{ "extends": ["config:recommended", "github>jflowers/ship//renovate/automerge#vX.Y.Z"] }
+```
+
+Same policy: third-party updates wait a day (`minimumReleaseAge`) and stay
+open for a person; non-major updates from our orgs have no wait and
+Renovate turns on GitHub auto-merge for them, by rebase.
+
+## Settings
+
+`repos.yaml`'s `settings:` is the GitHub settings every repo there should
+have; a repo's own `settings:` overrides them and its `checks:` are the
+status checks its default branch requires.
+
+```bash
+scripts/settings-sync.sh [--apply] [owner | owner/repo ...]
+```
+
+Without `--apply` it prints the plan. Defaults: Dependabot alerts (which
+turn on the dependency graph that `dependency-review-action` needs),
+Dependabot security updates, auto-merge, rebase merges, and deleting merged
+branches. `checks:` go in one ruleset, `ship: required checks`, which
+repository admins bypass, so you can still push to the default branch. A
+repo without `checks:` keeps the rulesets and branch protection it has; the
+plan shows them.
+
 ## Secrets
 
 ship holds no secrets. Each caller passes its own, and
@@ -356,7 +437,7 @@ SHA, never `@main`, and keep `main` protected.
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh
+actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -375,6 +456,8 @@ import and tap steps it shares with `go-release.yml` haven't drifted;
 against fixture repos, a fake `gh` and a fake `npm`.
 `scripts/test-secrets-sync.sh` runs the sync
 against a fixture config, a fake `HOME` and a fake `gh`.
+`scripts/test-deps-automerge.sh` runs `deps-automerge.yml`'s decide and gate
+steps and `settings-sync.sh` against a fake `gh`.
 
 ## Roadmap
 

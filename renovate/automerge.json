@@ -1,0 +1,41 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "ship: complytime/org-infra's dependency policy for Renovate. Non-major updates from our own orgs rebase-merge themselves once the required checks pass; third-party updates wait a day and are merged by a person.",
+  "minimumReleaseAge": "1 day",
+  "internalChecksFilter": "strict",
+  "packageRules": [
+    {
+      "description": "Our own orgs: no release-age wait, and non-major updates merge themselves by rebase through GitHub auto-merge.",
+      "matchPackageNames": [
+        "jflowers/**",
+        "unbound-force/**",
+        "zero-dot-force/**",
+        "github.com/jflowers/**",
+        "github.com/unbound-force/**",
+        "github.com/zero-dot-force/**",
+        "@jflowers/**",
+        "@unbound-force/**",
+        "@zero-dot-force/**"
+      ],
+      "minimumReleaseAge": null
+    },
+    {
+      "matchPackageNames": [
+        "jflowers/**",
+        "unbound-force/**",
+        "zero-dot-force/**",
+        "github.com/jflowers/**",
+        "github.com/unbound-force/**",
+        "github.com/zero-dot-force/**",
+        "@jflowers/**",
+        "@unbound-force/**",
+        "@zero-dot-force/**"
+      ],
+      "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "rebase",
+      "platformAutomerge": true
+    }
+  ]
+}

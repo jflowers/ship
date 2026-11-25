@@ -11,6 +11,9 @@
 #          npm | pypi | container | cue-module
 # workflow: the shared workflow it calls today; "own" = not migrated yet.
 # migrating: the open PR that moves it to a shared workflow, until merged.
+# deps:     how its dependency PRs merge themselves: deps-automerge.yml
+#           (Dependabot) or renovate/automerge.json (Renovate), with the
+#           ship version it pins; absent = by hand.
 # mise:     its pin in chezmoi's dot_config/mise/config.toml, if any.
 # secrets:  the secret sets (below) its release needs; a repo with a `tap`
 #           also gets that tap's token as HOMEBREW_TAP_TOKEN.
@@ -48,6 +51,18 @@ secrets:
   # to the repos listed here, instead of copied into each repo. (A personal
   # account has no org secrets, so jflowers repos get repo secrets.)
   orgs: [unbound-force]
+
+# GitHub settings, set by scripts/settings-sync.sh: these defaults for
+# every repo below, then a repo's own `settings:` on top. A repo's
+# `checks:` are the status checks its default branch requires (one
+# ruleset, admins bypass it); without them the repo keeps what it has.
+settings:
+  defaults:
+    vulnerability_alerts: true # and so the dependency graph
+    security_updates: true
+    allow_auto_merge: true
+    allow_rebase_merge: true
+    delete_branch_on_merge: true
 
 repos:
   # --- unbound-force ---
@@ -117,6 +132,7 @@ repos:
     secrets: [macos-sign, android-sign]
     tap: jflowers/homebrew-tools
     workflow: tag-release.yml + mac-app-release.yml@v0.7.0 # jflowers/gh-hud#193, released v0.3.20
+    deps: deps-automerge.yml # jflowers/gh-hud deps-automerge branch
     mise: go:github.com/jflowers/gh-hud/cmd/gh-hud
   jflowers/get-out:
     kinds: [go-cli, cask]

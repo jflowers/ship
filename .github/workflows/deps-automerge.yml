@@ -1,0 +1,184 @@
+# Dependabot auto-merge, by rebase
+# ================================
+# complytime/org-infra's ci_dependencies.yml policy: a safe update from our
+# own orgs gets GitHub auto-merge turned on, so it rebase-merges by itself
+# once the base branch's required checks pass; a safe third-party update
+# is only approved (with approve: true) and a person merges it. Nothing is
+# merged before CI: the run fails when the base branch requires no checks.
+#
+#   meta     dependabot/fetch-metadata: the update type (the highest in a
+#            group) and every dependency in the PR
+#   decide   safe: a known semver type at or below max_update_type
+#            owned:  every dependency belongs to one of `owners`
+#                    (jflowers/x, github.com/jflowers/x, @jflowers/x)
+#   review   actions/dependency-review-action, when safe: no known
+#            vulnerabilities in what the PR adds (needs the dependency
+#            graph; scripts/settings-sync.sh turns it on)
+#   gate     when safe and owned: the repo allows auto-merge and the merge
+#            method, and the base branch requires at least one status check
+#            (a ruleset or branch protection)
+#   approve  when safe, with approve: true: for a branch that requires a
+#            review ("Allow GitHub Actions to create and approve pull
+#            requests" on)
+#   merge    when safe and owned: gh pr merge --auto --<merge_method>
+#
+# org-infra's 24h release-age gate is Dependabot's own `cooldown` here (set
+# it in .github/dependabot.yml, with our orgs excluded, as org-infra skips
+# the gate for them); Dependabot opens nothing younger.
+#
+# Caller permissions: contents: write, pull-requests: write.
+
+name: Dependabot auto-merge
+
+on:
+  workflow_call:
+    inputs:
+      owners:
+        description: Space-separated owners whose packages merge themselves.
+        type: string
+        default: jflowers unbound-force zero-dot-force
+      merge_method:
+        description: rebase, squash or merge.
+        type: string
+        default: rebase
+      max_update_type:
+        description: "The highest safe update: patch, minor or major."
+        type: string
+        default: minor
+      dependency_review:
+        description: Block on actions/dependency-review-action (needs the dependency graph).
+        type: boolean
+        default: true
+      approve:
+        description: Approve safe updates, for a branch that requires a review.
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  automerge:
+    name: Auto-merge
+    # Dependabot's own PR, from a branch in this repo: a fork's PR or a
+    # person's push to the dependabot branch never gets here.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # gh pr merge --auto
+      pull-requests: write # approve, enable auto-merge
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - id: decide
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DEPS_JSON: ${{ steps.meta.outputs.updated-dependencies-json }}
+          MAX: ${{ inputs.max_update_type }}
+          OWNERS: ${{ inputs.owners }}
+        run: |
+          set -euo pipefail
+          rank() {
+            case $1 in
+              patch | version-update:semver-patch) echo 1 ;;
+              minor | version-update:semver-minor) echo 2 ;;
+              major | version-update:semver-major) echo 3 ;;
+              *) echo 0 ;;
+            esac
+          }
+          max=$(rank "$MAX")
+          if [ "$max" = 0 ]; then
+            echo "::error::max_update_type must be patch, minor or major, not '$MAX'"
+            exit 1
+          fi
+          deps=$(jq -r '.[].dependencyName' <<<"${DEPS_JSON:-[]}")
+          list=$(echo "$deps" | paste -sd, - | sed 's/,/, /g')
+          kind=${UPDATE_TYPE#version-update:semver-}
+
+          safe=true
+          have=$(rank "$UPDATE_TYPE")
+          if [ "$have" = 0 ]; then
+            safe=false why="update type unknown ('$UPDATE_TYPE')"
+          elif [ "$have" -gt "$max" ]; then
+            safe=false why="$kind is above $MAX"
+          fi
+
+          # Owned: every dependency's owner (github.com/ and @ stripped, the
+          # first path part) is one of OWNERS.
+          owned=true
+          [ -n "$deps" ] || owned=false
+          while IFS= read -r d; do
+            [ -n "$d" ] || continue
+            o=${d#github.com/} o=${o#@} o=${o%%/*}
+            case " $OWNERS " in
+              *" $o "*) ;;
+              *) owned=false ;;
+            esac
+          done <<<"$deps"
+
+          { echo "safe=$safe"; echo "owned=$owned"; } >>"$GITHUB_OUTPUT"
+          if [ "$safe" = false ]; then
+            echo "::notice::$list: $why; left for a person"
+          elif [ "$owned" = false ]; then
+            echo "::notice::$list: $kind, third-party; left for a person to merge"
+          else
+            echo "$list: $kind, from our orgs; auto-merging"
+          fi
+
+      - if: steps.decide.outputs.safe == 'true' && inputs.dependency_review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          comment-summary-in-pr: never
+
+      - id: gate
+        if: steps.decide.outputs.safe == 'true' && steps.decide.outputs.owned == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          METHOD: ${{ inputs.merge_method }}
+        run: |
+          set -euo pipefail
+          case $METHOD in
+            rebase | squash | merge) ;;
+            *) echo "::error::merge_method must be rebase, squash or merge, not '$METHOD'"; exit 1 ;;
+          esac
+          missing=()
+          settings=$(gh api "repos/$REPO" --jq "[.allow_auto_merge, .allow_${METHOD}_merge] | @tsv")
+          read -r auto allowed <<<"$settings"
+          [ "$auto" = true ] || missing+=("auto-merge is off for $REPO")
+          [ "$allowed" = true ] || missing+=("$METHOD merges are off for $REPO")
+          # Required checks, from rulesets and from classic branch protection.
+          ruleset=$(gh api "repos/$REPO/rules/branches/$BASE" \
+            --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]] | length')
+          classic=$(gh api "repos/$REPO/branches/$BASE" \
+            --jq '[.protection.required_status_checks.contexts // [] | .[]] | length')
+          if [ "$((ruleset + classic))" -eq 0 ]; then
+            missing+=("$BASE requires no status checks, so auto-merge would merge before CI")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            for m in "${missing[@]}"; do echo "::error::$m"; done
+            echo "::error::Set them in jflowers/ship's repos.yaml and run scripts/settings-sync.sh --apply $REPO"
+            exit 1
+          fi
+          echo "$BASE requires $((ruleset + classic)) check(s); $METHOD auto-merge is allowed"
+
+      - if: steps.decide.outputs.safe == 'true' && inputs.approve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.html_url }}
+          TYPE: ${{ steps.meta.outputs.update-type }}
+        run: |
+          gh pr review --approve "$PR" --body "Auto-approved: ${TYPE#version-update:semver-} update, no known vulnerabilities."
+
+      - if: steps.decide.outputs.safe == 'true' && steps.decide.outputs.owned == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.html_url }}
+          METHOD: ${{ inputs.merge_method }}
+        run: gh pr merge --auto "--$METHOD" "$PR"

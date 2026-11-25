@@ -103,13 +103,20 @@ repos:
     kinds: [go-cli, cask, formula]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: own
-    notes: formula + staging-tap install test; needs formula support in go-release.yml
+    workflow: go-release.yml@v0.9.0 # unbound-force/unbound-force#1224
+    notes: >-
+      formula: unbound-force and a cask_install_check (unbound-force, the uf
+      alias); the cask's postflight_steps come from a custom_block, not a
+      transform at release time. verify-dispatch proved the wiring; the next
+      release is its first through ship
     mise: go:github.com/unbound-force/unbound-force/cmd/unbound-force
   unbound-force/containerfile:
     kinds: [container]
-    workflow: own
-    notes: quay.io with username/password; actions not SHA-pinned
+    workflow: container-image.yml@v0.9.0 # unbound-force/containerfile#15
+    notes: >-
+      opencode-dev (build-push.yml) and opencode-base (build-base.yml, weekly;
+      re-enabled 2026-11-25 after GitHub disabled it for inactivity) on
+      quay.io; QUAY_USERNAME/QUAY_PASSWORD passed as REGISTRY_*
   unbound-force/intake-kit:
     kinds: [cue-module]
     workflow: own

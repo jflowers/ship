@@ -57,6 +57,9 @@ secrets:
 # `checks:` are the status checks its default branch requires (one
 # ruleset, admins bypass it); without them the repo keeps what it has.
 settings:
+  # Orgs whose settings their own git-ops owns: safe-settings, from
+  # safe-settings/ in <org>/.github. settings-sync.sh leaves them alone.
+  skip: [unbound-force, zero-dot-force]
   defaults:
     vulnerability_alerts: true # and so the dependency graph
     security_updates: true
@@ -110,7 +113,6 @@ repos:
   unbound-force/intake-kit:
     kinds: [cue-module]
     workflow: own
-    checks: ["test"]
     deps: deps-automerge.yml@v0.8.0 # unbound-force/intake-kit#18
 
   # --- zero-dot-force ---
@@ -118,12 +120,10 @@ repos:
     kinds: [go-cli]
     workflow: go-release.yml@v0.7.0 # zero-dot-force/vibe-check#105
     mise: go:github.com/zero-dot-force/vibe-check/cmd/vibe-check
-    checks: ["test", "lint"]
     deps: deps-automerge.yml@v0.8.0 # zero-dot-force/vibe-check#109
   zero-dot-force/snake-eyes:
     kinds: [pypi]
     workflow: tag-release.yml@v0.7.0 # zero-dot-force/snake-eyes#41; PyPI trusted publishing stays in the caller's job
-    checks: ["test (3.11)", "test (3.12)"]
     deps: deps-automerge.yml@v0.8.0 # zero-dot-force/snake-eyes#43
   zero-dot-force/reading-stone:
     kinds: [npm]
@@ -133,7 +133,6 @@ repos:
       taken from the tag; npm's trusted publisher names release.yml and the
       `npm` environment. v0.2.2 was the first release through ship (on
       v0.3.0, GitHub release created by hand)
-    checks: ["test (22)", "test (24)"]
     deps: deps-automerge.yml@v0.8.0 # zero-dot-force/reading-stone#45
 
   # --- jflowers ---

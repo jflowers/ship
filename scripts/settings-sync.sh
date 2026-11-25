@@ -18,7 +18,8 @@
 # kept in one ruleset, "ship: required checks", that repository admins
 # bypass (so you can still push to it). deps-automerge.yml needs at least
 # one required check, here or in branch protection. A repo without
-# `checks:` keeps whatever it has.
+# `checks:` keeps whatever it has. Owners in settings.skip are left alone:
+# their own git-ops (safe-settings) owns their settings.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -31,7 +32,7 @@ apply=0 targets=()
 while (($#)); do
   case $1 in
     --apply) apply=1 ;;
-    -h | --help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "settings-sync: unknown flag $1" >&2; exit 2 ;;
     *) targets+=("$1") ;;
   esac
@@ -55,6 +56,8 @@ if ((${#targets[@]})); then
 fi
 [[ -n $repos ]] || { echo "settings-sync: no repos in repos.yaml match ${targets[*]}" >&2; exit 1; }
 
+skip=" $(yq -r '.settings.skip // [] | join(" ")' "$config") "
+
 changes=0
 change() { # what; counts it and says so
   echo "  set     $1"
@@ -63,6 +66,10 @@ change() { # what; counts it and says so
 
 for repo in $repos; do
   echo "$repo"
+  if [[ $skip == *" ${repo%%/*} "* ]]; then
+    echo "  --      skipped: ${repo%%/*} is in settings.skip (its own git-ops owns it)"
+    continue
+  fi
   want=$(r=$repo yq -o=json -I=0 '(.settings.defaults // {}) * (.repos[strenv(r)].settings // {})' "$config")
   info=$(gh api "repos/$repo")
 

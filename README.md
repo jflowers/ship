@@ -405,6 +405,13 @@ repository admins bypass, so you can still push to the default branch. A
 repo without `checks:` keeps the rulesets and branch protection it has; the
 plan shows them.
 
+Owners in `settings.skip` are left alone: unbound-force and zero-dot-force
+manage their repos' settings with safe-settings, in `safe-settings/` of
+their `.github` repos, so a setting deps-automerge.yml needs there (auto-merge,
+a required check) goes in a PR to that repo instead. Their code repos also
+require a code owner's approval, so our own updates there merge themselves
+once you approve them.
+
 ### `container-image.yml`: a multi-arch container image
 
 1. **Settings**: `image` is `registry/path` with no tag, every tag is valid,

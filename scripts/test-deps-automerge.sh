@@ -108,6 +108,7 @@ if ! gate fastforward && grep -q "merge_method must be" "$t/out"; then ok "gate:
 # --- settings-sync.sh -------------------------------------------------------
 cat >"$t/repos.yaml" <<'EOF'
 settings:
+  skip: [x]
   defaults:
     vulnerability_alerts: true
     security_updates: true
@@ -174,6 +175,11 @@ rm -f "$t/api/calls"
 if sync --apply o/r && grep -q "^PUT repos/o/r/rulesets/42" "$t/api/calls" && ! grep -q "^POST" "$t/api/calls"; then
   ok "sync: --apply replaces its own ruleset"
 else fail "sync: --apply replaces its own ruleset"; fi
+
+rm -f "$t/api/calls"
+if sync --apply x && grep -q "skipped: x is in settings.skip" "$t/out" && [ ! -e "$t/api/calls" ]; then
+  ok "sync: an owner in settings.skip is left alone"
+else fail "sync: an owner in settings.skip is left alone"; fi
 
 rm -f "$t/api/calls"
 if sync --apply o/priv && grep -q "rulesets unavailable" "$t/out" && grep -q "^0 change" "$t/out" &&

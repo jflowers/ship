@@ -122,6 +122,26 @@ EOF
   if install_check 'test -e "$HOMEBREW_PREFIX/bin/not-installed"'; then
     fail "install check: a failing check fails the step"
   else ok "install check: a failing check fails the step"; fi
+
+  # The post-release check installs from the published tap by its
+  # owner/homebrew-name: the same cask, tapped here from the local clone
+  # as ship-test/published, is found as ship-test/homebrew-published.
+  tapinstall=$(yq '.jobs.verify-tap-install.steps[] | select(.id == "tap-install") | .run' "$wf")
+  [ -n "$tapinstall" ] || { echo "no tap-install step in $wf"; exit 1; }
+  brew untap ship-test/published >/dev/null 2>&1 || true
+  brew tap ship-test/published "$t/tap" >/dev/null 2>&1
+  brew trust ship-test/published >/dev/null 2>&1 || true
+  tap_check() { (cd "$t" && TAP=ship-test/homebrew-published CASK=$cask CHECK=$1 bash -c "$tapinstall") > "$t/log" 2>&1; }
+  # shellcheck disable=SC2016
+  if tap_check '"$HOMEBREW_PREFIX/bin/ship-install-demo" | grep -qx "demo ok"' &&
+    ! brew list --cask "$cask" >/dev/null 2>&1; then
+    ok "tap install check: installs from owner/homebrew-name, checks, and is removed after"
+  else fail "tap install check: installs from owner/homebrew-name, checks, and is removed after"; fi
+  # shellcheck disable=SC2016
+  if tap_check 'test -e "$HOMEBREW_PREFIX/bin/not-installed"'; then
+    fail "tap install check: a failing check fails the step"
+  else ok "tap install check: a failing check fails the step"; fi
+  brew untap ship-test/published >/dev/null 2>&1 || true
 else
   echo "skip install check: it installs a cask, so it runs only on CI"
 fi

@@ -25,6 +25,7 @@ jobs:
       - run: scripts/test-npm-steps.sh
       - run: scripts/test-mac-app-steps.sh
       - run: scripts/test-container-steps.sh
+      - run: scripts/test-post-release.sh
       - run: scripts/test-npm-bootstrap.sh
       - run: scripts/test-secrets-sync.sh
       - run: scripts/test-deps-automerge.sh

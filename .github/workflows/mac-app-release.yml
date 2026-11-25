@@ -293,7 +293,10 @@ jobs:
           [[ $SHA256 =~ ^[0-9a-f]{64}$ ]] || { echo "::error::the app job gave no sha256"; exit 1; }
           # The url spells the version as #{version}, so livecheck and brew
           # read it from the version line.
-          url="https://github.com/$GITHUB_REPOSITORY/releases/download/v#{version}/${ZIP//$VERSION/#\{version\}}"
+          # A variable, not an escaped literal: bash versions disagree on
+          # backslashes in a pattern substitution's replacement.
+          v='#{version}'
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/v$v/${ZIP//"$VERSION"/$v}"
           {
             echo "# Written by ${GITHUB_REPOSITORY}'s release (jflowers/ship mac-app-release.yml). Edits are overwritten."
             echo "cask \"$CASK\" do"

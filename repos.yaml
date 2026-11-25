@@ -93,11 +93,12 @@ repos:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: go-release.yml@v0.9.0 # unbound-force/gaze#362, #392
+    workflow: go-release.yml@v0.10.0 # unbound-force/gaze#362, #392, #403
     notes: >-
       its tap token is the repo secret HOMEBREW_TAP_GITHUB_TOKEN, mapped to
       HOMEBREW_TAP_TOKEN in its caller (the sync leaves it alone); keeps
-      three release gates and post-release-install-check.yml of its own
+      three release gates of its own; go_install checks its mise package
+      after each release (replacing its post-release-install-check.yml)
     mise: go:github.com/unbound-force/gaze/v2/cmd/gaze
     deps: deps-automerge.yml@v0.8.0 # unbound-force/gaze#389
   unbound-force/unbound-force:

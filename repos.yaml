@@ -155,7 +155,6 @@ repos:
     secrets: [macos-sign]
     tap: jflowers/homebrew-tools
     workflow: own
-    checks: ["build-and-test"]
   jflowers/gh-slack-notify:
     kinds: [go-cli]
     workflow: none # released by tag only; built from source by mise

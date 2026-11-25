@@ -509,11 +509,11 @@ steps and `settings-sync.sh` against a fake `gh`.
 
 ## Roadmap
 
-- the post-release install check from gaze (a check after the tap push),
-  `pypi` publishing
+- the post-release install check from gaze (a check after the tap push)
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
 - `gh ship status | release | secrets`, driven by `repos.yaml`
   (`secrets-sync.sh` becomes `gh ship secrets`)
-- A sync job that keeps each repo's `release.yml` current; Renovate for the
-  `@<sha>` pins
+- A sync job that keeps each repo's `release.yml` current (the `@<sha>` pins
+  are already kept current by Dependabot's ship group, merged by
+  `deps-automerge.yml`)
 - gh-hud: a Releases view, and `toolkit.toml` generated from `repos.yaml`

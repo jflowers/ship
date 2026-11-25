@@ -4,8 +4,8 @@
 # first version can't come from npm-release.yml. For each npm repo in
 # repos.yaml whose package isn't on npm, this:
 #
-#   1. publishes package.json's version from a fresh clone of the default
-#      branch (npm asks for your 2FA),
+#   1. publishes package.json's version (or the first version, below) from
+#      a fresh clone of the default branch (npm asks for your 2FA),
 #   2. waits until the registry serves it,
 #   3. adds the trusted publisher (`npm trust github`), naming the repo's
 #      caller workflow and, if it passes one, its environment,
@@ -13,12 +13,15 @@
 #      publish is skipped because the version is on npm, and the GitHub
 #      release is created.
 #
-#   scripts/npm-bootstrap.sh [--apply] [owner | owner/repo ...]
+#   scripts/npm-bootstrap.sh [--apply] [--first-version X.Y.Z] [owner | owner/repo ...]
 #
-# Without --apply it only prints the plan. A package already on npm whose
-# version has no tag yet (an earlier run stopped part way) gets steps 3-4.
-# A repo that isn't ready (private, caller not on the default branch, a
-# build at publish time) is skipped with the reason.
+# Without --apply it only prints the plan. A package.json version of 0.0.0
+# or 0.0.0-anything (the placeholder for version_from: tag) is published as
+# the first version instead, 0.1.0 unless --first-version says otherwise.
+# A package already on npm whose version has no tag yet (an earlier run
+# stopped part way) gets steps 3-4. A repo that isn't ready (private, caller
+# not on the default branch, a build at publish time) is skipped with the
+# reason.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -29,16 +32,23 @@ npm_cmd=${SHIP_NPM:-npx -y npm@11.21.2}
 poll=${SHIP_POLL_SECONDS:-15}
 polls=${SHIP_POLLS:-40}
 
-apply=0 targets=()
+apply=0 targets=() first=${SHIP_FIRST_VERSION:-0.1.0}
 while (($#)); do
   case $1 in
     --apply) apply=1 ;;
-    -h | --help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --first-version)
+      (($# > 1)) || { echo "npm-bootstrap: --first-version needs a version" >&2; exit 2; }
+      first=$2; shift ;;
+    -h | --help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "npm-bootstrap: unknown flag $1" >&2; exit 2 ;;
     *) targets+=("$1") ;;
   esac
   shift
 done
+if [[ ! $first =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || $first == 0.0.0 ]]; then
+  echo "npm-bootstrap: the first version must be X.Y.Z above 0.0.0, not '$first'" >&2
+  exit 2
+fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -71,13 +81,16 @@ caller_of() { # <owner/repo> <ref>
   return 1
 }
 
+# package.json's version under version_from: tag (e.g. 0.0.0-development).
+placeholder() { [[ $1 == 0.0.0 || $1 == 0.0.0-* ]]; }
+
 on_npm() { # <name> [version]; any npm can look, so skip npx's start-up
   command npm view "$1${2:+@$2}" version --prefer-online >/dev/null 2>&1
 }
 
 # --- the plan -----------------------------------------------------------
 # One row per repo to act on: repo|branch|name|version|caller|env|stage|
-# steps (all or trust).
+# steps (all or trust)|package.json's version as committed.
 : >"$tmp/plan"
 ready=0 skipped=0
 skip() { echo "skip  $repo: $1"; skipped=$((skipped + 1)); }
@@ -98,6 +111,9 @@ for repo in $(yq -r '.repos | to_entries[] | select(.value.kinds[]? == "npm") | 
   if [[ -z $name || -z $version ]]; then
     skip "package.json on $branch has no name or version"; continue
   fi
+  # The version as committed; a placeholder is published as $first.
+  pkgver=$version
+  placeholder "$version" && version=$first
 
   if on_npm "$name"; then
     # Bootstrapped, unless this version is on npm with no tag yet.
@@ -139,14 +155,16 @@ for repo in $(yq -r '.repos | to_entries[] | select(.value.kinds[]? == "npm") | 
 
   verb=publish
   [[ $stage == true ]] && verb=stage
+  from=
+  [[ $pkgver != "$version" ]] && from=" (package.json has the placeholder $pkgver)"
   case $steps in
-    all) what="$verb $name@$version, trust $caller${env:+ (environment $env)}, dispatch v$version" ;;
+    all) what="$verb $name@$version$from, trust $caller${env:+ (environment $env)}, dispatch v$version" ;;
     trust) what="$name@$version is on npm with no tag: trust $caller${env:+ (environment $env)}, dispatch v$version" ;;
   esac
   echo "ready $repo: $what"
   # `|`, not a tab: read collapses runs of whitespace, so an empty env
   # would shift every field after it.
-  printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$repo" "$branch" "$name" "$version" "$caller" "$env" "$stage" "$steps" >>"$tmp/plan"
+  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$repo" "$branch" "$name" "$version" "$caller" "$env" "$stage" "$steps" "$pkgver" >>"$tmp/plan"
   ready=$((ready + 1))
 done
 
@@ -168,7 +186,7 @@ echo "Publishing as npm user $user"
 failed=0
 # The plan comes in on fd 3 so stdin stays your terminal: npm only waits
 # for the 2FA web login when stdin is a TTY, and fails with EOTP otherwise.
-while IFS='|' read -r repo branch name version caller env stage steps <&3; do
+while IFS='|' read -r repo branch name version caller env stage steps pkgver <&3; do
   echo
   echo "== $repo ($name@$version)"
   if [[ $steps == all ]]; then
@@ -176,8 +194,15 @@ while IFS='|' read -r repo branch name version caller env stage steps <&3; do
     gh repo clone "$repo" "$dir" -- --quiet --depth 1 --branch "$branch"
     # The checked-out version must be the one the plan read.
     got=$(yq -r '.version' "$dir/package.json")
-    if [[ $got != "$version" ]]; then
+    if [[ $got != "$pkgver" ]]; then
       echo "npm-bootstrap: $repo's $branch moved to $got since the plan; run it again" >&2
+      failed=$((failed + 1)); continue
+    fi
+    # A placeholder: publish the planned first version, as the release
+    # workflow sets it from the tag.
+    if [[ $pkgver != "$version" ]] &&
+      ! (cd "$dir" && npm version "$version" --no-git-tag-version --allow-same-version >/dev/null); then
+      echo "npm-bootstrap: setting $name's version to $version failed" >&2
       failed=$((failed + 1)); continue
     fi
     publish=(publish --access public --ignore-scripts)

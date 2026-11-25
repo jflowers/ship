@@ -27,6 +27,7 @@ repos:
   acme/tool: { kinds: [go] }
   org/staged: { kinds: [npm] }
   org/auto: { kinds: [npm] }
+  acme/placeholder: { kinds: [npm] }
 EOF
 
 caller() { # <file> [with lines]
@@ -65,6 +66,7 @@ echo 'name: CI' >"$F/org/staged/workflows/ci.yml"
 caller '      stage: "true"
       environment: npm' >"$F/org/staged/workflows/release.yml"
 repo org/auto PUBLIC Organization 0.2.0
+repo acme/placeholder PUBLIC User 0.0.0-development
 
 printf '%s\n' 'done' 'done@1.2.0' partial partial@0.1.0 >"$F/npm-published"
 
@@ -100,6 +102,8 @@ log() { echo "npm $*" >>"$LOG"; }
 case $1 in
   whoami) [ -z "${LOGGED_OUT:-}" ] && echo tester ;;
   view) grep -qxF "$2" "$F/npm-published" ;;
+  version)
+    yq -i -o json ".version = \"$2\"" package.json; log "version $2 ${*:3}" ;;
   publish)
     n=$(yq -r .name package.json); v=$(yq -r .version package.json)
     # stdin must be the caller's (npm prompts for 2FA there), not the plan
@@ -135,7 +139,8 @@ for want in \
   "skip  acme/badurl: badurl: package.json repository.url is 'git+https://github.com/acme/other.git'" \
   "ready org/staged: stage staged@0.3.0, trust release.yml (environment npm), dispatch v0.3.0" \
   "ready org/auto: stage auto@0.2.0, trust publish.yml, dispatch v0.2.0" \
-  "4 ready, 4 skipped"; do
+  "ready acme/placeholder: publish placeholder@0.1.0 (package.json has the placeholder 0.0.0-development), trust publish.yml, dispatch v0.1.0" \
+  "5 ready, 4 skipped"; do
   if has "$want" "$t/out"; then ok "plan: $want"; else fail "plan: $want"; fi
 done
 if ! grep -q 'acme/done\|acme/tool' "$t/out"; then ok "plan: published and non-npm repos are left out"; else fail "plan: published and non-npm repos are left out"; fi
@@ -163,6 +168,17 @@ if [ "$(grep -n 'publish new@' "$t/log" | cut -d: -f1)" -lt "$(grep -n 'trust gi
   [ "$(grep -n 'trust github new' "$t/log" | cut -d: -f1)" -lt "$(grep -n 'workflow run' "$t/log" | cut -d: -f1)" ]; then
   ok "apply: in that order"
 else fail "apply: in that order"; fi
+
+if run --first-version 1.0.0 acme/placeholder && has "publish placeholder@1.0.0 (package.json has the placeholder 0.0.0-development), trust publish.yml, dispatch v1.0.0" "$t/out"; then
+  ok "plan: --first-version sets a placeholder's first version"
+else fail "plan: --first-version sets a placeholder's first version"; fi
+if ! run --first-version 1.0 && has "must be X.Y.Z" "$t/out"; then ok "plan: a bad --first-version is refused"; else fail "plan: a bad --first-version is refused"; fi
+
+run --apply acme/placeholder || true
+expect_log "a placeholder is published as the first version" \
+  "npm version 0.1.0 --no-git-tag-version --allow-same-version" \
+  "npm publish placeholder@0.1.0 --access public --ignore-scripts" \
+  "gh workflow run publish.yml -R acme/placeholder --ref main -f tag=v0.1.0"
 
 cp "$t/published.orig" "$F/npm-published"
 run --apply acme/partial || true

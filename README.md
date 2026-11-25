@@ -104,19 +104,36 @@ release:
 ### `npm-release.yml`: npm package, through trusted publishing
 
 A release is one dispatch, plus your 2FA approval on npmjs.com when the
-version is staged.
+version is staged:
+
+```bash
+gh workflow run publish.yml -f tag=v1.2.3
+```
+
+There's no version bump to commit first. The version comes from the tag
+(`version_from: tag`, the default): publish sets it in the checked-out
+`package.json` just before publishing, without a commit. The tag, the
+GitHub release and npm record which version is released. Keep a
+placeholder in `package.json` so the repo doesn't show a stale number:
+
+```json
+"version": "0.0.0-development",
+```
+
+A real version there still works (the tag overrides it), but it goes stale
+after the next release. With `version_from: package`, `package.json` must
+hold the released version instead, so every release needs a bump committed
+first.
 
 1. **Settings**: before anything is tagged, checks the run is on the default
-   branch and `version_from` is `package` or `tag`, decides whether to stage
+   branch and `version_from` is `tag` or `package`, decides whether to stage
    (below), and checks `npm_version` is new enough (11.5.1 to publish,
    11.15.0 to stage). Then it checks `package.json` on the commit about to
    be tagged:
    - `repository.url` must be this repo, or trusted publishing fails;
-   - the version must equal the tag (`version_from: package`), unless it's
-     set from the tag (`version_from: tag`).
-
-   A forgotten bump fails here, with nothing tagged: bump it and dispatch
-   the same tag again.
+   - with `version_from: package`, the version must equal the tag. A
+     forgotten bump fails here, with nothing tagged: bump it and dispatch
+     the same tag again.
 2. **Preflight** (org-infra): semver, tag uniqueness, CI on HEAD, unreleased
    commits; creates the tag.
 3. **Publish**: checks out the tag and checks `package.json` again. If the
@@ -124,7 +141,8 @@ version is staged.
    job is skipped and the run goes on to the GitHub release, so a re-run is
    safe.
 
-   Then it runs `install` and `checks`, and publishes with provenance, or
+   Then it runs `install` and `checks`, sets the version from the tag, and
+   publishes with provenance, or
    stages the version for a maintainer to approve on npmjs.com. A prerelease
    (`v1.2.0-rc.1`) goes to the `next` dist-tag, not `latest`.
 4. **GitHub release**: creates the release for the tag with generated notes
@@ -175,7 +193,7 @@ jobs:
 
 Inputs: `tag`, `ci_checks`, `allow_prerelease` (default true),
 `skip_semver_check`, `skip_ci_checks`, `skip_unreleased_check`,
-`version_from` (`package` or `tag`, default `package`), `stage` (`auto`,
+`version_from` (`tag` or `package`, default `tag`), `stage` (`auto`,
 `true` or `false`, default `auto`), `github_release` (default true),
 `environment`, `node_version` (default 24), `bun_version` (empty: no Bun),
 `npm_version` (default 11.21.2), `install` (default `npm ci`) and `checks`.
@@ -185,8 +203,10 @@ package that already exists, so the first version can't come from this
 workflow. [`scripts/npm-bootstrap.sh`](scripts/npm-bootstrap.sh) does it
 for every npm repo in `repos.yaml` whose package isn't on npm yet:
 
-1. publishes `package.json`'s version from a fresh clone of the default
-   branch (staged instead, in an organization), which asks for your 2FA;
+1. publishes the first version from a fresh clone of the default branch
+   (staged instead, in an organization), which asks for your 2FA. That's
+   `package.json`'s version, or, when it's a placeholder (`0.0.0` or
+   `0.0.0-anything`), `0.1.0` or the version given with `--first-version`;
 2. waits until the registry serves it;
 3. adds the trusted publisher with `npm trust github`, naming the repo's
    caller workflow and its `environment`, allowing publishing or staging
@@ -199,6 +219,7 @@ for every npm repo in `repos.yaml` whose package isn't on npm yet:
 scripts/npm-bootstrap.sh                                         # plan: what's ready, and why the rest isn't
 scripts/npm-bootstrap.sh --apply                                 # all of them
 scripts/npm-bootstrap.sh --apply jflowers/opencode-session-notes # just one repo (or owner)
+scripts/npm-bootstrap.sh --apply --first-version 1.0.0 acme/new  # a placeholder's first version, if not 0.1.0
 ```
 
 Before it changes anything, `--apply` checks `npm whoami` and stops if npm

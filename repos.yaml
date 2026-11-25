@@ -150,11 +150,6 @@ repos:
     workflow: tag-release.yml + mac-app-release.yml@v0.7.0 # jflowers/gh-hud#193, released v0.3.20
     deps: deps-automerge.yml@v0.8.0 # jflowers/gh-hud#202
     mise: go:github.com/jflowers/gh-hud/cmd/gh-hud
-  jflowers/get-out:
-    kinds: [go-cli, cask]
-    secrets: [macos-sign]
-    tap: jflowers/homebrew-tools
-    workflow: own
   jflowers/gh-slack-notify:
     kinds: [go-cli]
     workflow: none # released by tag only; built from source by mise

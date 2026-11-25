@@ -1,0 +1,111 @@
+# Tag release, for repos whose assets ship's other workflows don't build
+# =====================================================================
+# The front half of every ship release, on its own: the caller's release
+# workflow calls this with a tag, then runs its own jobs (or another ship
+# workflow, such as mac-app-release.yml) to build and upload the assets,
+# each `needs:` this one and checking out the tag it outputs. In order:
+#
+#   settings        before anything is tagged: the run is on the default
+#                   branch
+#   preflight       org-infra: semver, tag uniqueness, CI on HEAD,
+#                   unreleased commits; creates the annotated tag
+#   github-release  creates the GitHub release for the tag with generated
+#                   notes (a prerelease for vX.Y.Z-suffix tags), unless it
+#                   exists, so asset jobs only upload to it
+#
+# Caller permissions: contents: write, checks: read.
+
+name: Tag release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release (e.g. v1.2.3)
+        required: true
+        type: string
+      ci_checks:
+        description: JSON array of check-run names that must pass on HEAD. Empty = org-infra auto-discovery.
+        type: string
+        default: ""
+      allow_prerelease:
+        type: boolean
+        default: true
+      skip_semver_check:
+        type: boolean
+        default: false
+      skip_ci_checks:
+        type: boolean
+        default: false
+      skip_unreleased_check:
+        type: boolean
+        default: false
+      github_release:
+        description: Create the GitHub release for the tag, with generated notes.
+        type: boolean
+        default: true
+    outputs:
+      tag:
+        description: The tag preflight created; empty if it created none.
+        value: ${{ jobs.preflight.outputs.tag }}
+
+permissions: {}
+
+jobs:
+  settings:
+    name: Settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - id: s
+        env:
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Run the release from $DEFAULT_BRANCH (this run is on $REF)"
+            exit 1
+          fi
+
+  preflight:
+    name: Preflight
+    needs: settings
+    uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
+    with:
+      tag: ${{ inputs.tag }}
+      ci_checks: ${{ inputs.ci_checks }}
+      allow_prerelease: ${{ inputs.allow_prerelease }}
+      skip_semver_check: ${{ inputs.skip_semver_check }}
+      skip_ci_checks: ${{ inputs.skip_ci_checks }}
+      skip_unreleased_check: ${{ inputs.skip_unreleased_check }}
+    permissions:
+      contents: write
+      checks: read
+
+  github-release:
+    name: GitHub release
+    needs: preflight
+    if: inputs.github_release && needs.preflight.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists; leaving it unchanged"
+            exit 0
+          fi
+          flags=(--verify-tag --generate-notes)
+          case "$TAG" in
+            *-*) flags+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" "${flags[@]}"

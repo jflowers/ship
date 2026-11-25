@@ -35,6 +35,13 @@ releases would stop until the callers were repointed.
    is rebased and retried (5 tries); a conflict on the same cask fails
    instead of overwriting.
 
+   With `formula`, the GoReleaser formula (release asset `<formula>-formula.rb`)
+   gets the same sha256 rewrite and is committed as `Formula/<formula>.rb`;
+   brew must load it (GoReleaser formulas can't pass `brew audit`: a
+   redundant `version`, no `test do`). With `cask_install_check`, the
+   candidate cask is installed from the tap clone on macOS and the check runs
+   (`$HOMEBREW_PREFIX` set) before anything is pushed.
+
 This replaces the sign-and-notarize jobs copied into replicator, dewey, gaze
 and unbound-force, and pins org-infra in one place.
 
@@ -495,8 +502,8 @@ steps and `settings-sync.sh` against a fake `gh`.
 
 ## Roadmap
 
-- `formula` support (unbound-force/unbound-force), the post-release install
-  check from gaze, `pypi` publishing
+- the post-release install check from gaze (a check after the tap push),
+  `pypi` publishing
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
 - `gh ship status | release | secrets`, driven by `repos.yaml`
   (`secrets-sync.sh` becomes `gh ship secrets`)

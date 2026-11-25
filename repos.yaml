@@ -127,16 +127,16 @@ repos:
   # --- zero-dot-force ---
   zero-dot-force/vibe-check:
     kinds: [go-cli]
-    workflow: go-release.yml@v0.7.0 # zero-dot-force/vibe-check#105
+    workflow: go-release.yml@v0.9.0 # zero-dot-force/vibe-check#105, #111
     mise: go:github.com/zero-dot-force/vibe-check/cmd/vibe-check
     deps: deps-automerge.yml@v0.8.0 # zero-dot-force/vibe-check#109
   zero-dot-force/snake-eyes:
     kinds: [pypi]
-    workflow: tag-release.yml@v0.7.0 # zero-dot-force/snake-eyes#41; PyPI trusted publishing stays in the caller's job
+    workflow: tag-release.yml@v0.9.0 # zero-dot-force/snake-eyes#41, #44; PyPI trusted publishing stays in the caller's job
     deps: deps-automerge.yml@v0.8.0 # zero-dot-force/snake-eyes#43
   zero-dot-force/reading-stone:
     kinds: [npm]
-    workflow: npm-release.yml@v0.6.0 # zero-dot-force/reading-stone#34, #37, #39, #42
+    workflow: npm-release.yml@v0.9.0 # zero-dot-force/reading-stone#34, #37, #39, #42, #46
     notes: >-
       always staged (stage: "true"; approved on npmjs.com with 2FA), version
       taken from the tag; npm's trusted publisher names release.yml and the
@@ -149,7 +149,7 @@ repos:
     kinds: [go-cli, mac-app, cask, android-apk]
     secrets: [macos-sign, android-sign]
     tap: jflowers/homebrew-tools
-    workflow: tag-release.yml + mac-app-release.yml@v0.7.0 # jflowers/gh-hud#193, released v0.3.20
+    workflow: tag-release.yml + mac-app-release.yml@v0.9.0 # jflowers/gh-hud#193, #209, released v0.3.20
     deps: deps-automerge.yml@v0.8.0 # jflowers/gh-hud#202
     mise: go:github.com/jflowers/gh-hud/cmd/gh-hud
   jflowers/gh-slack-notify:
@@ -164,7 +164,7 @@ repos:
     settings: { allow_auto_merge: false } # private on GitHub Free: no auto-merge, no rulesets
   jflowers/opencode-supervisor:
     kinds: [npm]
-    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-supervisor#85, #90, #95
+    workflow: npm-release.yml@v0.9.0 # jflowers/opencode-supervisor#85, #90, #95; v0.9.0 by Dependabot's ship group
     notes: >-
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
@@ -172,7 +172,7 @@ repos:
     deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-supervisor#101
   jflowers/opencode-auto-question:
     kinds: [npm]
-    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-auto-question#42, #44, #45
+    workflow: npm-release.yml@v0.9.0 # jflowers/opencode-auto-question#42, #44, #45; v0.9.0 by Dependabot's ship group
     notes: >-
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
@@ -180,7 +180,7 @@ repos:
     deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-auto-question#47
   jflowers/opencode-session-search:
     kinds: [npm]
-    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-session-search#2, #4, #13
+    workflow: npm-release.yml@v0.9.0 # jflowers/opencode-session-search#2, #4, #13; v0.9.0 by Dependabot's ship group
     notes: >-
       publishes as opencode-session-searcher (the unscoped name is
       taken); 0.1.0 bootstrapped with scripts/npm-bootstrap.sh
@@ -189,7 +189,7 @@ repos:
     deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-session-search#16
   jflowers/opencode-session-notes:
     kinds: [npm]
-    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-session-notes#3, #5, #8
+    workflow: npm-release.yml@v0.9.0 # jflowers/opencode-session-notes#3, #5, #8; v0.9.0 by Dependabot's ship group
     notes: >-
       0.1.0 bootstrapped with scripts/npm-bootstrap.sh (trusted
       publisher publish.yml)
@@ -197,7 +197,7 @@ repos:
     deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-session-notes#13
   jflowers/opencode-research-harness:
     kinds: [npm]
-    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-research-harness#11, #13, #18
+    workflow: npm-release.yml@v0.9.0 # jflowers/opencode-research-harness#11, #13, #18; v0.9.0 by Dependabot's ship group
     notes: >-
       made public for provenance; 0.1.0 bootstrapped with
       scripts/npm-bootstrap.sh (trusted publisher publish.yml)
@@ -205,7 +205,7 @@ repos:
     deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-research-harness#23
   jflowers/opencode-debug-harness:
     kinds: [npm]
-    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-debug-harness#1, #5, #11
+    workflow: npm-release.yml@v0.9.0 # jflowers/opencode-debug-harness#1, #5, #11; v0.9.0 by Dependabot's ship group
     notes: >-
       made public for provenance; 0.1.0 bootstrapped with
       scripts/npm-bootstrap.sh (trusted publisher publish.yml)

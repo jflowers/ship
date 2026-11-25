@@ -105,7 +105,12 @@ for repo in $repos; do
   fi
 
   # Required checks, in ship's ruleset.
+  # A private repo on GitHub Free has no rulesets or branch protection.
   checks=$(r=$repo yq -o=json -I=0 '.repos[strenv(r)].checks // []' "$config")
+  if ! rulesets=$(gh api "repos/$repo/rulesets" 2>/dev/null); then
+    echo "  --      checks: rulesets unavailable (a private repo needs GitHub Pro); nothing can be required"
+    continue
+  fi
   if [[ $checks == "[]" ]]; then
     branch=$(jq -r .default_branch <<<"$info")
     now=$(gh api "repos/$repo/rules/branches/$branch" \
@@ -115,7 +120,7 @@ for repo in $repos; do
     echo "  --      checks: not in repos.yaml (rulesets: ${now:-none}; branch protection: ${classic:-none})"
     continue
   fi
-  id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name == \"$ruleset_name\") | .id" | head -1)
+  id=$(jq -r ".[] | select(.name == \"$ruleset_name\") | .id" <<<"$rulesets" | head -1)
   have="[]"
   if [[ -n $id ]]; then
     have=$(gh api "repos/$repo/rulesets/$id" \

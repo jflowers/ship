@@ -84,6 +84,7 @@ repos:
       its cask uses the deprecated `postflight do` hook (a hard error in
       Homebrew after 2027-12-11); move it to postflight_steps like replicator
     mise: go:github.com/unbound-force/dewey/v3
+    deps: deps-automerge.yml@v0.8.0 # unbound-force/dewey#257
   unbound-force/gaze:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
@@ -94,6 +95,7 @@ repos:
       HOMEBREW_TAP_TOKEN in its caller (the sync leaves it alone); keeps
       three release gates and post-release-install-check.yml of its own
     mise: go:github.com/unbound-force/gaze/v2/cmd/gaze
+    deps: deps-automerge.yml@v0.8.0 # unbound-force/gaze#389
   unbound-force/unbound-force:
     kinds: [go-cli, cask, formula]
     secrets: [macos-sign]
@@ -108,15 +110,21 @@ repos:
   unbound-force/intake-kit:
     kinds: [cue-module]
     workflow: own
+    checks: ["test"]
+    deps: deps-automerge.yml@v0.8.0 # unbound-force/intake-kit#18
 
   # --- zero-dot-force ---
   zero-dot-force/vibe-check:
     kinds: [go-cli]
     workflow: go-release.yml@v0.7.0 # zero-dot-force/vibe-check#105
     mise: go:github.com/zero-dot-force/vibe-check/cmd/vibe-check
+    checks: ["test", "lint"]
+    deps: deps-automerge.yml@v0.8.0 # zero-dot-force/vibe-check#109
   zero-dot-force/snake-eyes:
     kinds: [pypi]
     workflow: tag-release.yml@v0.7.0 # zero-dot-force/snake-eyes#41; PyPI trusted publishing stays in the caller's job
+    checks: ["test (3.11)", "test (3.12)"]
+    deps: deps-automerge.yml@v0.8.0 # zero-dot-force/snake-eyes#43
   zero-dot-force/reading-stone:
     kinds: [npm]
     workflow: npm-release.yml@v0.6.0 # zero-dot-force/reading-stone#34, #37, #39, #42
@@ -125,6 +133,8 @@ repos:
       taken from the tag; npm's trusted publisher names release.yml and the
       `npm` environment. v0.2.2 was the first release through ship (on
       v0.3.0, GitHub release created by hand)
+    checks: ["test (22)", "test (24)"]
+    deps: deps-automerge.yml@v0.8.0 # zero-dot-force/reading-stone#45
 
   # --- jflowers ---
   jflowers/gh-hud:
@@ -139,26 +149,34 @@ repos:
     secrets: [macos-sign]
     tap: jflowers/homebrew-tools
     workflow: own
+    checks: ["build-and-test"]
+    deps: deps-automerge.yml@v0.8.0 # jflowers/get-out#11
   jflowers/gh-slack-notify:
     kinds: [go-cli]
     workflow: none # released by tag only; built from source by mise
     mise: go:github.com/jflowers/gh-slack-notify/cmd/gh-slack-notify
+    settings: { allow_auto_merge: false } # private on GitHub Free: no auto-merge, no rulesets
   jflowers/ghws:
     kinds: [go-cli]
     workflow: none # pinned to a commit in mise
     mise: go:github.com/jflowers/ghws/cmd/ghws
+    settings: { allow_auto_merge: false } # private on GitHub Free: no auto-merge, no rulesets
   jflowers/opencode-supervisor:
     kinds: [npm]
     workflow: npm-release.yml@v0.6.0 # jflowers/opencode-supervisor#85, #90, #95
     notes: >-
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
+    checks: ["check"]
+    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-supervisor#101
   jflowers/opencode-auto-question:
     kinds: [npm]
     workflow: npm-release.yml@v0.6.0 # jflowers/opencode-auto-question#42, #44, #45
     notes: >-
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
+    checks: ["typecheck and test"]
+    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-auto-question#47
   jflowers/opencode-session-search:
     kinds: [npm]
     workflow: npm-release.yml@v0.6.0 # jflowers/opencode-session-search#2, #4, #13
@@ -166,21 +184,29 @@ repos:
       publishes as opencode-session-searcher (the unscoped name is
       taken); 0.1.0 bootstrapped with scripts/npm-bootstrap.sh
       (trusted publisher publish.yml)
+    checks: ["typecheck and test"]
+    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-session-search#16
   jflowers/opencode-session-notes:
     kinds: [npm]
     workflow: npm-release.yml@v0.6.0 # jflowers/opencode-session-notes#3, #5, #8
     notes: >-
       0.1.0 bootstrapped with scripts/npm-bootstrap.sh (trusted
       publisher publish.yml)
+    checks: ["typecheck and test"]
+    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-session-notes#13
   jflowers/opencode-research-harness:
     kinds: [npm]
     workflow: npm-release.yml@v0.6.0 # jflowers/opencode-research-harness#11, #13, #18
     notes: >-
       made public for provenance; 0.1.0 bootstrapped with
       scripts/npm-bootstrap.sh (trusted publisher publish.yml)
+    checks: ["typecheck and test"]
+    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-research-harness#23
   jflowers/opencode-debug-harness:
     kinds: [npm]
     workflow: npm-release.yml@v0.6.0 # jflowers/opencode-debug-harness#1, #5, #11
     notes: >-
       made public for provenance; 0.1.0 bootstrapped with
       scripts/npm-bootstrap.sh (trusted publisher publish.yml)
+    checks: ["typecheck and test"]
+    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-debug-harness#16

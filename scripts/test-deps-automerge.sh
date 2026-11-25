@@ -118,6 +118,8 @@ repos:
     checks: [Lint, Test]
   o/done:
     settings: { allow_rebase_merge: false }
+  o/priv:
+    checks: [Lint]
   x/other: {}
 EOF
 sync() { SHIP_REPOS=$t/repos.yaml "$here/settings-sync.sh" "$@" >"$t/out" 2>&1; }
@@ -128,6 +130,10 @@ echo '{"default_branch": "main", "allow_auto_merge": true, "allow_rebase_merge":
 echo '{"enabled": true}' | api repos/o/done/automated-security-fixes
 echo '' | api repos/o/done/vulnerability-alerts
 echo '[]' | api repos/o/done/rules/branches/main
+echo '[]' | api repos/o/done/rulesets
+echo '{"default_branch": "main", "allow_auto_merge": true, "allow_rebase_merge": true}' | api repos/o/priv
+echo '{"enabled": true}' | api repos/o/priv/automated-security-fixes
+echo '' | api repos/o/priv/vulnerability-alerts
 echo '{"protection": {"required_status_checks": {"contexts": ["CI"]}}}' | api repos/o/done/branches/main
 rm -f "$t/api/calls"
 
@@ -168,6 +174,12 @@ rm -f "$t/api/calls"
 if sync --apply o/r && grep -q "^PUT repos/o/r/rulesets/42" "$t/api/calls" && ! grep -q "^POST" "$t/api/calls"; then
   ok "sync: --apply replaces its own ruleset"
 else fail "sync: --apply replaces its own ruleset"; fi
+
+rm -f "$t/api/calls"
+if sync --apply o/priv && grep -q "rulesets unavailable" "$t/out" && grep -q "^0 change" "$t/out" &&
+  [ ! -e "$t/api/calls" ]; then
+  ok "sync: a repo without rulesets (private, Free) is reported, not fatal"
+else fail "sync: a repo without rulesets (private, Free) is reported, not fatal"; fi
 
 echo 'settings: { defaults: { allow_rebase: true } }
 repos: { o/r: {} }' >"$t/bad.yaml"

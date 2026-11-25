@@ -132,6 +132,16 @@ expect_package pass "version already on npm is skipped, not failed" v1.2.3 packa
 expect_package pass "only that version is taken" v1.2.4 package "$(pkg 1.2.4 "$https")" "published=false"
 expect_package fail "a mismatched version still fails when published" v1.2.3 package "$(pkg 1.2.2 "$https")"
 
+# One dispatch by default: the version comes from the tag, so a caller
+# still holding an older real version releases without a bump.
+if [ "$(yq '.on.workflow_call.inputs.version_from.default' "$wf")" = tag ]; then
+  ok "inputs: version_from defaults to tag"
+else
+  : > "$t/err"; fail "inputs: version_from defaults to tag"
+fi
+expect_early pass "version from the tag ignores an older real version" v2.16.0 tag "$(pkg 2.15.0 "$https")"
+expect_package pass "an older real version publishes as the tag's" v2.16.0 tag "$(pkg 2.15.0 "$https")" "version=2.16.0"
+
 # release <tag>; what `gh release create` got lands in $t/created
 run_release() {
   : > "$t/created"

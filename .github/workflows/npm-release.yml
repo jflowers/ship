@@ -1,17 +1,20 @@
 # npm release, shared by every npm package in repos.yaml
 # =====================================================
 # A repo's own publish workflow calls this with a tag. A release is then one
-# dispatch, plus a 2FA approval on npmjs.com when the version is staged.
-# In order:
+# dispatch, plus a 2FA approval on npmjs.com when the version is staged: the
+# version comes from the tag (`version_from: tag`, the default), so there's
+# no bump to commit first. In order:
 #
 #   settings        before anything is tagged: checks the inputs and that the
 #                   run is on the default branch, decides whether to stage,
-#                   and checks package.json (repository.url, and the version
-#                   against the tag) on the commit about to be tagged
+#                   and checks package.json (repository.url, and with
+#                   `version_from: package` the version against the tag) on
+#                   the commit about to be tagged
 #   preflight       org-infra: semver, tag uniqueness, CI on HEAD,
 #                   unreleased commits; creates the annotated tag
 #   publish         checks out the tag, checks package.json against the tag
-#                   and the repo, installs, runs the caller's checks, then
+#                   and the repo, installs, runs the caller's checks, sets
+#                   the version from the tag, then
 #                   publishes through npm trusted publishing (OIDC, no
 #                   token), or stages the version for a maintainer to approve
 #                   on npmjs.com. A version already on npm is skipped, so a
@@ -64,11 +67,12 @@ on:
         default: false
       version_from:
         description: >-
-          `package`: package.json's version must equal the tag (minus the v).
-          `tag`: package.json holds a placeholder and the version is set from
-          the tag at publish time, without a commit.
+          `tag`: the version is set from the tag at publish time, without a
+          commit, so package.json can hold a placeholder (0.0.0-development).
+          `package`: package.json's version must equal the tag (minus the v),
+          so each release needs a bump committed first.
         type: string
-        default: package
+        default: tag
       stage:
         description: >-
           `auto`: stage when the repo belongs to an organization, publish

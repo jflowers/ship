@@ -97,11 +97,11 @@ repos:
   # --- zero-dot-force ---
   zero-dot-force/vibe-check:
     kinds: [go-cli]
-    workflow: own # org-infra at an untagged main SHA
+    workflow: go-release.yml@v0.7.0 # zero-dot-force/vibe-check#105
     mise: go:github.com/zero-dot-force/vibe-check/cmd/vibe-check
   zero-dot-force/snake-eyes:
     kinds: [pypi]
-    workflow: own # PyPI trusted publishing must stay in the caller's job
+    workflow: tag-release.yml@v0.7.0 # zero-dot-force/snake-eyes#41; PyPI trusted publishing stays in the caller's job
   zero-dot-force/reading-stone:
     kinds: [npm]
     workflow: npm-release.yml@v0.6.0 # zero-dot-force/reading-stone#34, #37, #39, #42

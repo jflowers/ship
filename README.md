@@ -42,6 +42,17 @@ releases would stop until the callers were repointed.
    candidate cask is installed from the tap clone on macOS and the check runs
    (`$HOMEBREW_PREFIX` set) before anything is pushed.
 
+After the release, two optional checks install it the way users do:
+
+- **`go_install`** (a package, e.g. `github.com/org/tool/v2/cmd/tool`):
+  `go install <pkg>@<tag>` from the module proxy with an empty cache
+  (retried, since the proxy can lag a new tag), then the binary's build
+  info must name that package at the tag; `go_install_check` runs with
+  `$BIN` set. This is what `go install` and mise's `go:` backend users get,
+  unsigned and built from source.
+- **`tap_install_check`**: once the cask is pushed, `brew install --cask`
+  from the published tap on macOS, then the check (`$HOMEBREW_PREFIX` set).
+
 This replaces the sign-and-notarize jobs copied into replicator, dewey, gaze
 and unbound-force, and pins org-infra in one place.
 
@@ -484,7 +495,7 @@ SHA, never `@main`, and keep `main` protected.
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh
+actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-post-release.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -500,6 +511,9 @@ writer and `tag-release.yml`'s branch check, and checks that the signing
 import and tap steps it shares with `go-release.yml` haven't drifted;
 `test-audit-cask.sh` also audits a cask it writes.
 `scripts/test-container-steps.sh` runs `container-image.yml`'s settings check.
+`scripts/test-post-release.sh` runs `go-release.yml`'s post-release `go install`
+check against a fake `go`; `test-audit-cask.sh` also installs a cask from a
+tap by its `owner/homebrew-name` (on CI only).
 `scripts/test-npm-bootstrap.sh` runs the bootstrap's plan and `--apply`
 against fixture repos, a fake `gh` and a fake `npm`.
 `scripts/test-secrets-sync.sh` runs the sync

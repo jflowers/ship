@@ -18,6 +18,12 @@
 #                 load the formula, installs the cask and runs
 #                 `cask_install_check` when it's set, then pushes. Only when
 #                 `tap` is set.
+#   verify-go-install  after the release, with `go_install`: `go install
+#                 <pkg>@<tag>` from the module proxy (retried for its lag),
+#                 checks the build info names that package at the tag, and
+#                 runs `go_install_check`
+#   verify-tap-install after the push, with `tap_install_check`: `brew install
+#                 --cask` from the published tap, then the check
 #
 # The org-infra SHA lives here only, so bumping it once moves every repo.
 #
@@ -84,6 +90,25 @@ on:
           candidate cask from the tap clone, before it's pushed (e.g. test -x
           "$HOMEBREW_PREFIX/bin/tool"). Empty = no install. A failure stops
           the push.
+        type: string
+        default: ""
+      go_install:
+        description: >-
+          After the release, `go install <this package>@<tag>` from the Go
+          module proxy (what `go install` and mise's go: backend users get)
+          and check the binary's build info names this package at the tag
+          (e.g. github.com/org/tool/v2/cmd/tool). Empty = no check.
+        type: string
+        default: ""
+      go_install_check:
+        description: Shell commands run after the go install check, with $BIN set to the installed binary (e.g. "$BIN" --version).
+        type: string
+        default: ""
+      tap_install_check:
+        description: >-
+          After the tap push, shell commands run on macOS after `brew install
+          --cask` of the cask from the published tap, as a user would get it
+          ($HOMEBREW_PREFIX set). Needs `tap`. Empty = no check.
         type: string
         default: ""
     outputs:
@@ -486,3 +511,105 @@ jobs:
           done
           echo "::error::couldn't push to $TAP after 5 attempts"
           exit 1
+
+  # What a `go install` (or mise's go: backend) user gets: the module
+  # proxy's copy of the tag, built fresh. Not signed; that's the archives.
+  verify-go-install:
+    name: Post-release go install
+    needs: [preflight, release]
+    if: inputs.go_install != '' && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: {}
+    env:
+      TAG: ${{ needs.preflight.outputs.tag }}
+      PKG: ${{ inputs.go_install }}
+    steps:
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+
+      # Tested by scripts/test-post-release.sh (via yq) with a fake go.
+      # Keep the step id and the PKG/TAG/GOBIN/GOMODCACHE interface.
+      - name: go install from the module proxy
+        id: go-install
+        run: |
+          set -euo pipefail
+          # Empty GOBIN and module cache, so nothing cached can satisfy the
+          # install and the binary checked is the one built here.
+          GOBIN=${GOBIN:-$RUNNER_TEMP/gobin}
+          GOMODCACHE=${GOMODCACHE:-$RUNNER_TEMP/gomodcache}
+          mkdir -p "$GOBIN" "$GOMODCACHE"
+          export GOBIN GOMODCACHE
+          # The proxy can lag a just-pushed tag; the last attempt is fatal.
+          for attempt in 1 2 3 4 5; do
+            if go install "$PKG@$TAG"; then break; fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::go install $PKG@$TAG failed after 5 attempts"
+              exit 1
+            fi
+            echo "::warning::go install failed (attempt $attempt); retrying in 30s, the module proxy can lag a new tag"
+            sleep 30
+          done
+          bins=("$GOBIN"/*)
+          if [ "${#bins[@]}" -ne 1 ] || [ ! -x "${bins[0]}" ]; then
+            echo "::error::expected one binary in $GOBIN after go install, found: ${bins[*]}"
+            exit 1
+          fi
+          bin=${bins[0]}
+          info=$(go version -m "$bin")
+          path=$(awk '$1 == "path" { print $2; exit }' <<<"$info")
+          version=$(awk '$1 == "mod" { print $3; exit }' <<<"$info")
+          if [ "$path" != "$PKG" ]; then
+            echo "::error::the installed binary was built from '${path:-none}', not $PKG"
+            exit 1
+          fi
+          if [ "$version" != "$TAG" ]; then
+            echo "::error::the installed module is '${version:-none}', not $TAG"
+            exit 1
+          fi
+          echo "::notice::go install $PKG@$TAG: $(basename "$bin") built from $path $version"
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+
+      - name: Check the installed binary
+        if: inputs.go_install_check != ''
+        env:
+          BIN: ${{ steps.go-install.outputs.bin }}
+          CHECK: ${{ inputs.go_install_check }}
+        run: bash -euo pipefail -c "$CHECK"
+
+  # What a brew user gets: the cask as pushed, from the published tap.
+  verify-tap-install:
+    name: Post-release brew install
+    needs: [settings, publish-cask]
+    if: >-
+      always()
+      && inputs.tap != ''
+      && inputs.tap_install_check != ''
+      && needs.publish-cask.result == 'success'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions: {}
+    env:
+      TAP: ${{ inputs.tap }}
+      CASK: ${{ needs.settings.outputs.cask }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      # Tested by scripts/test-audit-cask.sh (via yq). Keep the step id and
+      # the TAP/CASK/CHECK interface.
+      - name: brew install from the published tap
+        id: tap-install
+        env:
+          CHECK: ${{ inputs.tap_install_check }}
+        run: |
+          set -euo pipefail
+          # owner/homebrew-name is tapped as owner/name.
+          owner=${TAP%%/*} repo=${TAP#*/}
+          name=$owner/${repo#homebrew-}
+          brew tap "$name"
+          trap 'brew uninstall --cask --force "$name/$CASK" >/dev/null 2>&1 || true' EXIT
+          brew trust "$name" >/dev/null 2>&1 || true # Homebrew 7 refuses untrusted taps
+          brew install --cask "$name/$CASK"
+          HOMEBREW_PREFIX=$(brew --prefix) bash -euo pipefail -c "$CHECK"

@@ -104,7 +104,7 @@ repos:
     workflow: own # PyPI trusted publishing must stay in the caller's job
   zero-dot-force/reading-stone:
     kinds: [npm]
-    workflow: npm-release.yml@v0.5.0 # zero-dot-force/reading-stone#34, #37, #39
+    workflow: npm-release.yml@v0.6.0 # zero-dot-force/reading-stone#34, #37, #39, #42
     notes: >-
       always staged (stage: "true"; approved on npmjs.com with 2FA), version
       taken from the tag; npm's trusted publisher names release.yml and the
@@ -133,38 +133,38 @@ repos:
     mise: go:github.com/jflowers/ghws/cmd/ghws
   jflowers/opencode-supervisor:
     kinds: [npm]
-    workflow: npm-release.yml@v0.5.0 # jflowers/opencode-supervisor#85, #90
+    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-supervisor#85, #90, #95
     notes: >-
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
   jflowers/opencode-auto-question:
     kinds: [npm]
-    workflow: npm-release.yml@v0.5.0 # jflowers/opencode-auto-question#42, #44
+    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-auto-question#42, #44, #45
     notes: >-
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
   jflowers/opencode-session-search:
     kinds: [npm]
-    workflow: npm-release.yml@v0.5.0 # jflowers/opencode-session-search#2, #4
+    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-session-search#2, #4, #13
     notes: >-
       publishes as opencode-session-searcher (the unscoped name is
       taken); 0.1.0 bootstrapped with scripts/npm-bootstrap.sh
       (trusted publisher publish.yml)
   jflowers/opencode-session-notes:
     kinds: [npm]
-    workflow: npm-release.yml@v0.5.0 # jflowers/opencode-session-notes#3, #5
+    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-session-notes#3, #5, #8
     notes: >-
       0.1.0 bootstrapped with scripts/npm-bootstrap.sh (trusted
       publisher publish.yml)
   jflowers/opencode-research-harness:
     kinds: [npm]
-    workflow: npm-release.yml@v0.5.0 # jflowers/opencode-research-harness#11, #13
+    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-research-harness#11, #13, #18
     notes: >-
       made public for provenance; 0.1.0 bootstrapped with
       scripts/npm-bootstrap.sh (trusted publisher publish.yml)
   jflowers/opencode-debug-harness:
     kinds: [npm]
-    workflow: npm-release.yml@v0.5.0 # jflowers/opencode-debug-harness#1, #5
+    workflow: npm-release.yml@v0.6.0 # jflowers/opencode-debug-harness#1, #5, #11
     notes: >-
       made public for provenance; 0.1.0 bootstrapped with
       scripts/npm-bootstrap.sh (trusted publisher publish.yml)

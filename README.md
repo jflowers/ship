@@ -523,7 +523,6 @@ steps and `settings-sync.sh` against a fake `gh`.
 
 ## Roadmap
 
-- the post-release install check from gaze (a check after the tap push)
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
 - `gh ship status | release | secrets`, driven by `repos.yaml`
   (`secrets-sync.sh` becomes `gh ship secrets`)

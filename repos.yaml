@@ -73,7 +73,7 @@ repos:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: go-release.yml@v0.2.1 # unbound-force/replicator#176
+    workflow: go-release.yml@v0.9.0 # unbound-force/replicator#176, #197
     notes: >-
       the live Casks/replicator.rb (0.7.0) has "#{staged_path}" in
       postflight_steps, which Homebrew 7 can't read; main has the fix, and
@@ -83,7 +83,7 @@ repos:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: go-release.yml@v0.2.1 # unbound-force/dewey#246
+    workflow: go-release.yml@v0.9.0 # unbound-force/dewey#246, #269
     notes: >-
       its cask uses the deprecated `postflight do` hook (a hard error in
       Homebrew after 2027-12-11); move it to postflight_steps like replicator
@@ -93,7 +93,7 @@ repos:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: go-release.yml@v0.2.1 # unbound-force/gaze#362
+    workflow: go-release.yml@v0.9.0 # unbound-force/gaze#362, #392
     notes: >-
       its tap token is the repo secret HOMEBREW_TAP_GITHUB_TOKEN, mapped to
       HOMEBREW_TAP_TOKEN in its caller (the sync leaves it alone); keeps

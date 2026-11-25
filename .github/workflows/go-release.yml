@@ -12,8 +12,12 @@
 #   sign-macos    Developer ID signing + notarization of every darwin archive,
 #                 re-uploaded with checksums.txt rewritten to match. Skipped
 #                 (not failed) when no signing secrets are passed.
-#   publish-cask  sets every sha256 in the cask from the final checksums.txt
-#                 and pushes it to the tap. Only when `tap` is set.
+#   publish-cask  sets every sha256 in the cask (and the formula, with
+#                 `formula`) from the final checksums.txt, commits them in a
+#                 clone of the tap, audits the cask, checks that brew can
+#                 load the formula, installs the cask and runs
+#                 `cask_install_check` when it's set, then pushes. Only when
+#                 `tap` is set.
 #
 # The org-infra SHA lives here only, so bumping it once moves every repo.
 #
@@ -22,7 +26,12 @@
 # Caller's GoReleaser config, when it publishes a cask:
 #   homebrew_casks: [{ ..., directory: Casks, skip_upload: true }]
 #   release.extra_files: [{ glob: dist/homebrew/Casks/<cask>.rb }]
-# and archives named <archive_prefix>_<version>_<os>_<arch>.tar.gz.
+# and archives named <archive_prefix>_<version>_<os>_<arch>.tar.gz. With a
+# formula too:
+#   brews: [{ ..., directory: Formula, skip_upload: true }]
+#   release.extra_files: [..., { glob: dist/homebrew/Formula/<formula>.rb,
+#                                name_template: <formula>-formula.rb }]
+# (the asset is renamed so it doesn't collide with the cask's <cask>.rb).
 
 name: Go release
 
@@ -63,6 +72,18 @@ on:
         default: ""
       cask:
         description: Cask name (<cask>.rb release asset, Casks/<cask>.rb in the tap). Defaults to the repo name.
+        type: string
+        default: ""
+      formula:
+        description: Also publish this formula (<formula>-formula.rb release asset, Formula/<formula>.rb in the tap). Empty = no formula.
+        type: string
+        default: ""
+      cask_install_check:
+        description: >-
+          Shell commands run on macOS after `brew install --cask` of the
+          candidate cask from the tap clone, before it's pushed (e.g. test -x
+          "$HOMEBREW_PREFIX/bin/tool"). Empty = no install. A failure stops
+          the push.
         type: string
         default: ""
     outputs:
@@ -296,27 +317,32 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_ANALYTICS: "1"
       TAP: ${{ inputs.tap }}
+      FORMULA: ${{ inputs.formula }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Download the cask and final checksums
+      - name: Download the cask, formula and final checksums
         run: |
           set -euo pipefail
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "$CASK.rb" --pattern checksums.txt --dir .
+          patterns=(--pattern "$CASK.rb" --pattern checksums.txt)
+          [ -n "$FORMULA" ] && patterns+=(--pattern "$FORMULA-formula.rb")
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" "${patterns[@]}" --dir .
 
       # Tested by scripts/test-steps.sh, which runs this block via yq.
-      # Keep the step id and the CASK_FILE/CHECKSUMS interface.
+      # Keep the step id and the CASK_FILE/FORMULA_FILE/CHECKSUMS interface.
       - name: Set every sha256 from checksums.txt
         id: patch
         env:
           CASK_FILE: ${{ env.CASK }}.rb
+          FORMULA_FILE: ${{ inputs.formula != '' && format('{0}-formula.rb', inputs.formula) || '' }}
           CHECKSUMS: checksums.txt
         run: |
           set -euo pipefail
           # Each `url "..._<os>_<arch>.tar.gz"` line takes the checksum of the
           # one archive ending in _<os>_<arch>.tar.gz; its sha256 line is the
           # line just before or just after the url. Order-independent and
-          # idempotent; fails if any url can't be matched.
+          # idempotent; fails if any url can't be matched. The cask, then the
+          # formula when there is one.
+          for file in "$CASK_FILE" ${FORMULA_FILE:+"$FORMULA_FILE"}; do
           awk '
             NR == FNR {
               if (match($2, /_[a-z0-9]+_[a-z0-9]+\.tar\.gz$/)) {
@@ -338,11 +364,12 @@ jobs:
                 sub(/sha256 "[0-9a-f]*"/, "sha256 \"" sum[k] "\"", line[j])
                 urls++
               }
-              if (bad || !urls) { if (!urls) print "::error::the cask has no archive urls" > "/dev/stderr"; exit 1 }
+              if (bad || !urls) { if (!urls) printf "::error::%s has no archive urls\n", FILENAME > "/dev/stderr"; exit 1 }
               for (i = 1; i <= n; i++) print line[i]
             }
-          ' "$CHECKSUMS" "$CASK_FILE" > "$CASK_FILE.new"
-          mv "$CASK_FILE.new" "$CASK_FILE"
+          ' "$CHECKSUMS" "$file" > "$file.new"
+          mv "$file.new" "$file"
+          done
 
       - name: Commit the cask in a clone of the tap
         id: stage
@@ -385,8 +412,65 @@ jobs:
           # tap's, whose casks install as <tap>/<cask>.
           brew audit --cask --strict --except=token_conflicts "$name/$CASK"
 
+      # After the cask's commit, so the steps above stay the same as
+      # mac-app-release.yml's (scripts/test-mac-app-steps.sh checks).
+      - name: Commit the formula
+        id: formula
+        if: inputs.formula != ''
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          mkdir -p Formula
+          cp "../$FORMULA-formula.rb" "Formula/$FORMULA.rb"
+          git add "Formula/$FORMULA.rb"
+          if git diff --cached --quiet; then
+            echo "Formula/$FORMULA.rb already current"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -q -m "$FORMULA ${TAG#v} (formula)" -m "From ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # GoReleaser's formulas can't pass `brew audit` (it always writes a
+      # redundant `version` and no `test do`), so this checks only that brew
+      # loads the committed formula: syntax, urls, stanzas. Tested by
+      # scripts/test-audit-cask.sh (via yq); keep the id and TAP_DIR/FORMULA.
+      - name: Check brew loads the formula
+        id: formula-loads
+        if: inputs.formula != ''
+        env:
+          TAP_DIR: tap
+        run: |
+          set -euo pipefail
+          name=ship-formula/candidate
+          brew untap "$name" >/dev/null 2>&1 || true
+          brew tap "$name" "$TAP_DIR"
+          trap 'brew untap "$name" >/dev/null 2>&1 || true' EXIT
+          brew trust "$name" >/dev/null 2>&1 || true
+          brew info --formula "$name/$FORMULA"
+
+      # Tested by scripts/test-audit-cask.sh (via yq). Keep the step id and
+      # the TAP_DIR/CASK/CHECK interface.
+      - name: Install the cask and check it
+        id: install
+        if: inputs.cask_install_check != ''
+        env:
+          TAP_DIR: tap
+          CHECK: ${{ inputs.cask_install_check }}
+        run: |
+          set -euo pipefail
+          # From the committed tap clone, so this installs exactly what is
+          # about to be pushed, from the release's (signed) archives.
+          name=ship-install/candidate
+          brew untap "$name" >/dev/null 2>&1 || true
+          brew tap "$name" "$TAP_DIR"
+          trap 'brew uninstall --cask --force "$name/$CASK" >/dev/null 2>&1 || true; brew untap --force "$name" >/dev/null 2>&1 || true' EXIT
+          brew trust "$name" >/dev/null 2>&1 || true
+          brew install --cask "$name/$CASK"
+          HOMEBREW_PREFIX=$(brew --prefix) bash -euo pipefail -c "$CHECK"
+
       - name: Push to the tap
-        if: steps.stage.outputs.changed == 'true'
+        if: steps.stage.outputs.changed == 'true' || steps.formula.outputs.changed == 'true'
         working-directory: tap
         run: |
           set -euo pipefail

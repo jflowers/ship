@@ -92,6 +92,46 @@ if ! runsum && grep -q "doesn't list every signed archive" "$t/err"; then
   ok "unlisted signed archive fails"
 else fail "unlisted signed archive fails"; fi
 
+# --- patch: a formula beside the cask (unbound-force, GoReleaser 2) ------
+# Both files take their sums from one checksums.txt; the formula's urls
+# spell the version out and its sha256 follows the url.
+formula_run() {
+  (cd "$t" && CASK_FILE=cask.rb FORMULA_FILE=${1-formula.rb} CHECKSUMS=checksums.txt bash -c "$step") 2> "$t/err"
+}
+cp "$here/testdata/formula-cask.rb" "$t/cask.rb"
+cp "$here/testdata/formula.rb" "$t/formula.rb"
+for k in darwin_amd64:1 darwin_arm64:2 linux_amd64:3 linux_arm64:4; do
+  printf '%s  unbound-force_0.22.0_%s.tar.gz\n' "$(printf "${k#*:}%.0s" $(seq 64))" "${k%:*}"
+done > "$t/checksums.txt"
+sumof() { awk -v k="_$1.tar.gz" 'index($2, k) { print $1 }' "$t/checksums.txt"; }
+if formula_run; then
+  good=1
+  for k in darwin_amd64 darwin_arm64 linux_amd64 linux_arm64; do
+    want=$(sumof "$k")
+    # formula: sha256 is the line after its url
+    got=$(grep -A1 "_${k}.tar.gz\"" "$t/formula.rb" | sed -n 's/.*sha256 "\([0-9a-f]*\)".*/\1/p' | sort -u)
+    [ "$got" = "$want" ] || { echo "formula $k: got '$got' want $want" >> "$t/err"; good=0; }
+    # cask: sha256 is the line before its url
+    got=$(grep -B1 "_${k}.tar.gz\"" "$t/cask.rb" | sed -n 's/.*sha256 "\([0-9a-f]*\)".*/\1/p')
+    [ "$got" = "$want" ] || { echo "cask $k: got '$got' want $want" >> "$t/err"; good=0; }
+  done
+  if [ "$good" = 1 ]; then ok "formula and cask both get every sha256"; else fail "formula and cask both get every sha256"; fi
+else fail "formula and cask both get every sha256"; fi
+
+# Without FORMULA_FILE the formula is left alone (and isn't required).
+cp "$here/testdata/formula.rb" "$t/formula.rb"
+if formula_run "" && cmp -s "$here/testdata/formula.rb" "$t/formula.rb"; then
+  ok "no FORMULA_FILE leaves the formula alone"
+else fail "no FORMULA_FILE leaves the formula alone"; fi
+
+# A formula whose archive isn't in checksums.txt fails, naming it.
+grep -v linux_arm64 "$t/checksums.txt" > "$t/c" && mv "$t/c" "$t/checksums.txt"
+cp "$here/testdata/formula-cask.rb" "$t/cask.rb"
+sed -i.bak '/on_linux/,$d' "$t/cask.rb" && echo end >> "$t/cask.rb"
+if ! formula_run && grep -q 'no unique checksum for \*_linux_arm64.tar.gz' "$t/err"; then
+  ok "a formula url with no checksum fails"
+else fail "a formula url with no checksum fails"; fi
+
 # --- publish-cask "push" step ---
 push=$(yq '.jobs.publish-cask.steps[] | select(.name == "Push to the tap") | .run' "$wf")
 gitc() { git -c user.name=test -c user.email=test@example.com "$@"; }

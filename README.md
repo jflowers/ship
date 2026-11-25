@@ -236,6 +236,87 @@ stops after staging: approve it on npmjs.com and run the script again,
 which finishes it with steps 3 and 4. So does any package whose version is
 on npm but has no tag yet.
 
+### `tag-release.yml`: the tag and GitHub release, for assets built elsewhere
+
+The front half of every ship release, for a repo whose assets no other ship
+workflow builds:
+
+1. **Settings**: the run is on the default branch.
+2. **Preflight** (org-infra): semver, tag uniqueness, CI on HEAD, unreleased
+   commits; creates the tag.
+3. **GitHub release**: created for the tag with generated notes (a
+   prerelease for a `vX.Y.Z-suffix` tag), unless it exists.
+
+It outputs `tag`. The caller's own jobs, or `mac-app-release.yml`, `needs:`
+it, check out that tag and upload their assets to the release. Caller
+permissions: `contents: write`, `checks: read`.
+
+### `mac-app-release.yml`: a signed, notarized Mac app and its cask
+
+Adds a Mac app to a release `tag-release.yml` made:
+
+1. **Settings**: the tag is `vX.Y.Z`; all five signing secrets are passed (a
+   Mac app is always signed and notarized); a `tap` has `HOMEBREW_TAP_TOKEN`
+   and a `cask_desc`.
+2. **Build, sign + notarize** (macOS): checks out the tag, runs `checks`,
+   then `build` with `$VERSION` (no v) set, which leaves the .app at `app`
+   (ad hoc signed is fine). The .app is signed with the Developer ID
+   (hardened runtime, timestamp), notarized, stapled, checked with
+   `spctl`, and uploaded as `<zip_prefix>_<version>.zip` (`<repo>-app` by
+   default), replacing any earlier upload.
+3. **Publish cask**: writes `Casks/<cask>.rb` for that zip (`desc`,
+   `homepage`, and `depends_on macos: ">= :<macos>"` when `macos` is set),
+   then commits, audits and pushes it as `go-release.yml` does. Skipped
+   without a `tap`, and for a prerelease tag.
+
+gh-hud's `release.yml`, with its Android job beside the Mac app:
+
+```yaml
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      tag: { description: "Release tag (e.g. v0.4.0)", required: true, type: string }
+permissions: {}
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    uses: jflowers/ship/.github/workflows/tag-release.yml@<sha> # vX.Y.Z
+    with:
+      tag: ${{ inputs.tag }}
+      ci_checks: '["Lint", "Test (ubuntu-latest)", "Vulnerabilities"]'
+    permissions:
+      contents: write
+      checks: read
+  mac-app:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: jflowers/ship/.github/workflows/mac-app-release.yml@<sha> # vX.Y.Z
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      checks: make mac-check
+      build: make mac MAC_VERSION="$VERSION" MAC_ARCHS="arm64 x86_64"
+      app: build/gh-hud.app
+      tap: jflowers/homebrew-tools
+      cask_desc: Dashboard for GitHub work and coding agents, a client of the gh-hud hub
+      macos: sonoma
+    secrets:
+      MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+      MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+      MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+      MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+      MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    permissions:
+      contents: write
+  android-app:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    # ... checks out refs/tags/${{ needs.release.outputs.tag }}, builds the APK, uploads it
+```
+
 ## Secrets
 
 ship holds no secrets. Each caller passes its own, and
@@ -265,7 +346,8 @@ a rotation doesn't reach those repos. Org secrets need the `admin:org`
 scope (`gh auth refresh -s admin:org`). Rotating the Developer ID or notary
 key is: update the `.age` file, `chezmoi apply`, `secrets-sync.sh --apply`.
 
-`MACOS_SIGN_IDENTITY` isn't synced: `go-release.yml` reads it from the .p12.
+`MACOS_SIGN_IDENTITY` isn't synced: `go-release.yml` and
+`mac-app-release.yml` read it from the .p12.
 
 Since callers hand these secrets to code in this repo, pin `uses:` to a
 SHA, never `@main`, and keep `main` protected.
@@ -274,7 +356,7 @@ SHA, never `@main`, and keep `main` protected.
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh
+actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -285,6 +367,10 @@ retry against a local bare repo. `scripts/test-audit-cask.sh` (macOS) runs
 the audit step on that cask. `scripts/test-npm-steps.sh` runs
 `npm-release.yml`'s settings, both `package.json` checks and the GitHub
 release step against fixture packages, a fake `npm view` and a fake `gh`.
+`scripts/test-mac-app-steps.sh` runs `mac-app-release.yml`'s settings and cask
+writer and `tag-release.yml`'s branch check, and checks that the signing
+import and tap steps it shares with `go-release.yml` haven't drifted;
+`test-audit-cask.sh` also audits a cask it writes.
 `scripts/test-npm-bootstrap.sh` runs the bootstrap's plan and `--apply`
 against fixture repos, a fake `gh` and a fake `npm`.
 `scripts/test-secrets-sync.sh` runs the sync
@@ -293,7 +379,7 @@ against a fixture config, a fake `HOME` and a fake `gh`.
 ## Roadmap
 
 - `formula` support (unbound-force/unbound-force), the post-release install
-  check from gaze, `container`, `pypi` publishing, `mac-app`
+  check from gaze, `container`, `pypi` publishing
   (from gh-hud)
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
 - `gh ship status | release | secrets`, driven by `repos.yaml`

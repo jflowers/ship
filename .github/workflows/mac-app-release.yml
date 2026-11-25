@@ -1,0 +1,379 @@
+# Mac app release: a signed, notarized .app, and its Homebrew cask
+# =================================================================
+# Adds the Mac app to a release that already exists: the caller's release
+# workflow runs tag-release.yml first (preflight tags, the GitHub release is
+# created), then calls this with the tag it output. In order:
+#
+#   settings  checks the secrets and inputs, so a misconfigured caller fails
+#             before the macOS runner starts
+#   app       on macOS, checks out the tag, runs the caller's `checks`, runs
+#             its `build` (which leaves an .app at `app`; it may be ad hoc
+#             signed), then signs the .app with the Developer ID (hardened
+#             runtime, timestamp), notarizes and staples it, checks it with
+#             spctl, and uploads <zip_prefix>_<version>.zip to the release
+#   cask      writes the cask for that zip, audits it with brew and pushes
+#             it to the tap. Only when `tap` is set, and never for a
+#             vX.Y.Z-suffix tag: a prerelease isn't offered to brew users.
+#
+# The build gets the version without the v as $VERSION, for Info.plist.
+# Re-running is safe: the zip is replaced, and an unchanged cask isn't
+# pushed.
+#
+# Caller permissions: contents: write.
+
+name: Mac app release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release's tag (e.g. v1.2.3), already created; tag-release.yml outputs it.
+        required: true
+        type: string
+      checks:
+        description: Shell commands run on the tag before the build (tests).
+        type: string
+        default: ""
+      build:
+        description: Shell commands that build the .app at `app`, with $VERSION set (1.2.3).
+        required: true
+        type: string
+      app:
+        description: Path of the .app the build leaves, from the repo root (e.g. build/MyApp.app).
+        required: true
+        type: string
+      zip_prefix:
+        description: The release asset is <zip_prefix>_<version>.zip. Defaults to <repo>-app.
+        type: string
+        default: ""
+      tap:
+        description: owner/repo of the Homebrew tap. Empty = no cask published.
+        type: string
+        default: ""
+      cask:
+        description: Cask name (Casks/<cask>.rb in the tap). Defaults to the repo name.
+        type: string
+        default: ""
+      cask_desc:
+        description: The cask's desc. Required when `tap` is set.
+        type: string
+        default: ""
+      homepage:
+        description: The cask's homepage. Defaults to the repo's GitHub page.
+        type: string
+        default: ""
+      macos:
+        description: Oldest macOS the app runs on, as Homebrew names it (e.g. sonoma). Empty = no depends_on.
+        type: string
+        default: ""
+    secrets:
+      MACOS_SIGN_P12:
+        description: Developer ID Application certificate + key, base64 .p12.
+        required: true
+      MACOS_SIGN_PASSWORD:
+        required: true
+      MACOS_SIGN_IDENTITY:
+        description: Signing identity. Absent = the Developer ID Application identity found in the .p12.
+        required: false
+      MACOS_NOTARY_KEY:
+        description: App Store Connect API key, base64 .p8.
+        required: true
+      MACOS_NOTARY_KEY_ID:
+        required: true
+      MACOS_NOTARY_ISSUER_ID:
+        required: true
+      HOMEBREW_TAP_TOKEN:
+        description: Can push to the tap. Required when `tap` is set.
+        required: false
+
+permissions: {}
+
+jobs:
+  # Secrets can't appear in a job-level `if`, so this job reports them.
+  settings:
+    name: Settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      version: ${{ steps.s.outputs.version }}
+      zip: ${{ steps.s.outputs.zip }}
+      cask: ${{ steps.s.outputs.cask }}
+      publish_cask: ${{ steps.s.outputs.publish_cask }}
+    steps:
+      # Tested by scripts/test-mac-app-steps.sh (via yq). Keep the step id
+      # and its env interface.
+      - id: s
+        env:
+          TAG: ${{ inputs.tag }}
+          APP: ${{ inputs.app }}
+          TAP: ${{ inputs.tap }}
+          CASK_DESC: ${{ inputs.cask_desc }}
+          REPO: ${{ github.event.repository.name }}
+          ZIP_PREFIX: ${{ inputs.zip_prefix }}
+          CASK: ${{ inputs.cask }}
+          HAS_MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 != '' }}
+          HAS_MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD != '' }}
+          HAS_MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY != '' }}
+          HAS_MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID != '' }}
+          HAS_MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID != '' }}
+          HAS_HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if ! [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag is '$TAG'; pass the tag tag-release.yml created (vX.Y.Z)"
+            exit 1
+          fi
+          case "$APP" in
+            *.app) ;;
+            *) echo "::error::app is '$APP'; it must be the path of an .app"; exit 1 ;;
+          esac
+          missing=()
+          for n in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID; do
+            v=HAS_$n
+            [ "${!v}" = true ] || missing+=("$n")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::A Mac app is signed and notarized; missing secrets: ${missing[*]}"
+            exit 1
+          fi
+          version=${TAG#v}
+          publish_cask=false
+          if [ -n "$TAP" ]; then
+            if [ "$HAS_HOMEBREW_TAP_TOKEN" != true ]; then
+              echo "::error::tap is $TAP but HOMEBREW_TAP_TOKEN wasn't passed"
+              exit 1
+            fi
+            if [ -z "$CASK_DESC" ]; then
+              echo "::error::tap is $TAP but cask_desc is empty; the cask needs a desc"
+              exit 1
+            fi
+            case "$version" in
+              *-*) echo "::notice::$TAG is a prerelease; the cask in $TAP stays as it is" ;;
+              *) publish_cask=true ;;
+            esac
+          fi
+          {
+            echo "version=$version"
+            echo "zip=${ZIP_PREFIX:-$REPO-app}_$version.zip"
+            echo "cask=${CASK:-$REPO}"
+            echo "publish_cask=$publish_cask"
+          } >> "$GITHUB_OUTPUT"
+
+  app:
+    name: Build, sign + notarize
+    needs: settings
+    runs-on: macos-latest
+    # The limit counts time spent waiting for a runner and for notarizing.
+    timeout-minutes: 60
+    permissions:
+      contents: write # uploads to the release
+    env:
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.settings.outputs.version }}
+      APP: ${{ inputs.app }}
+      ZIP: ${{ needs.settings.outputs.zip }}
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      sha256: ${{ steps.zip.outputs.sha256 }}
+    steps:
+      - name: The release exists
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null ||
+            { echo "::error::no release $TAG; run tag-release.yml first"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Checks
+        if: inputs.checks != ''
+        env:
+          CHECKS: ${{ inputs.checks }}
+        run: bash -euo pipefail -c "$CHECKS"
+      - name: Build
+        env:
+          BUILD: ${{ inputs.build }}
+        run: |
+          bash -euo pipefail -c "$BUILD"
+          [ -d "$APP" ] || { echo "::error::the build left no $APP"; exit 1; }
+
+      - name: Import the Developer ID
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          set -euo pipefail
+          keychain=$RUNNER_TEMP/signing.keychain-db
+          password=$(openssl rand -base64 32)
+          echo -n "$MACOS_SIGN_P12" | base64 --decode -o "$RUNNER_TEMP/cert.p12"
+          echo -n "$MACOS_NOTARY_KEY" | base64 --decode -o "$RUNNER_TEMP/notary.p8"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_SIGN_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
+          security list-keychain -d user -s "$keychain"
+          rm "$RUNNER_TEMP/cert.p12"
+          id=$MACOS_SIGN_IDENTITY
+          if [ -z "$id" ]; then
+            id=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+          fi
+          [ -n "$id" ] || { echo "::error::no Developer ID Application identity in MACOS_SIGN_P12"; exit 1; }
+          echo "SIGN_ID=$id" >> "$GITHUB_ENV"
+
+      - name: Sign and notarize
+        env:
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          codesign --force --timestamp --options runtime --sign "$SIGN_ID" "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+          submit=$RUNNER_TEMP/notarize.zip
+          ditto -c -k --keepParent "$APP" "$submit"
+          xcrun notarytool submit "$submit" \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" --wait --timeout 30m
+          rm "$submit"
+          xcrun stapler staple "$APP"
+          spctl --assess --type execute -vv "$APP"
+
+      - name: Zip
+        id: zip
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/out"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/out/$ZIP"
+          echo "sha256=$(shasum -a 256 "$RUNNER_TEMP/out/$ZIP" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Upload to the release
+        run: gh release upload "$TAG" "$RUNNER_TEMP/out/$ZIP" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8"
+
+  cask:
+    name: Publish cask
+    needs: [settings, app]
+    if: needs.settings.outputs.publish_cask == 'true'
+    # macOS: brew audits a cask's on_macos stanzas only on a Mac.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    concurrency:
+      group: homebrew-tap-${{ inputs.tap }}-${{ needs.settings.outputs.cask }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ inputs.tag }}
+      CASK: ${{ needs.settings.outputs.cask }}
+      TAP: ${{ inputs.tap }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      # Tested by scripts/test-mac-app-steps.sh and test-audit-cask.sh (via
+      # yq). Keep the step id and its env interface.
+      - name: Write the cask
+        id: write
+        env:
+          VERSION: ${{ needs.settings.outputs.version }}
+          SHA256: ${{ needs.app.outputs.sha256 }}
+          ZIP: ${{ needs.settings.outputs.zip }}
+          APP: ${{ inputs.app }}
+          DESC: ${{ inputs.cask_desc }}
+          HOMEPAGE: ${{ inputs.homepage }}
+          MACOS: ${{ inputs.macos }}
+        run: |
+          set -euo pipefail
+          [[ $SHA256 =~ ^[0-9a-f]{64}$ ]] || { echo "::error::the app job gave no sha256"; exit 1; }
+          # The url spells the version as #{version}, so livecheck and brew
+          # read it from the version line.
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/v#{version}/${ZIP//$VERSION/#\{version\}}"
+          {
+            echo "# Written by ${GITHUB_REPOSITORY}'s release (jflowers/ship mac-app-release.yml). Edits are overwritten."
+            echo "cask \"$CASK\" do"
+            echo "  version \"$VERSION\""
+            echo "  sha256 \"$SHA256\""
+            echo
+            echo "  url \"$url\""
+            echo "  name \"$(basename "$APP" .app)\""
+            echo "  desc \"$DESC\""
+            echo "  homepage \"${HOMEPAGE:-https://github.com/$GITHUB_REPOSITORY}\""
+            echo
+            echo "  livecheck do"
+            echo "    url :url"
+            echo "    strategy :github_latest"
+            echo "  end"
+            echo
+            if [ -n "$MACOS" ]; then
+              echo "  depends_on macos: \">= :$MACOS\""
+              echo
+            fi
+            echo "  app \"$(basename "$APP")\""
+            echo "end"
+          } > "$CASK.rb"
+          cat "$CASK.rb"
+
+      - name: Commit the cask in a clone of the tap
+        id: stage
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/${TAP}.git" tap
+          mkdir -p tap/Casks
+          cp "$CASK.rb" "tap/Casks/$CASK.rb"
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Casks/$CASK.rb"
+          if git diff --cached --quiet; then
+            echo "Casks/$CASK.rb already current"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -q -m "$CASK ${TAG#v}" -m "From ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The same audit as go-release.yml's; scripts/test-audit-cask.sh runs
+      # both. Keep the step id and the TAP_DIR/CASK interface.
+      - name: Audit the cask
+        id: audit
+        env:
+          TAP_DIR: tap
+        run: |
+          set -euo pipefail
+          # brew reads a cask only through a registered tap, and `brew tap
+          # <name> <path>` clones <path>, so this audits the committed cask.
+          name=ship-audit/candidate
+          brew untap "$name" >/dev/null 2>&1 || true
+          brew tap "$name" "$TAP_DIR"
+          trap 'brew untap "$name" >/dev/null 2>&1 || true' EXIT
+          brew trust "$name" >/dev/null 2>&1 || true # Homebrew 7 refuses untrusted taps
+          # token_conflicts flags a cask named like a homebrew/core formula
+          # (gaze): a rule for casks in homebrew/cask, not a third-party
+          # tap's, whose casks install as <tap>/<cask>.
+          brew audit --cask --strict --except=token_conflicts "$name/$CASK"
+
+      - name: Push to the tap
+        if: steps.stage.outputs.changed == 'true'
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          # Another repo may push to this tap at the same time; rebase onto
+          # it and retry. A conflict means someone else changed this cask:
+          # that fails rather than overwriting it.
+          branch=$(git rev-parse --abbrev-ref HEAD)
+          for attempt in 1 2 3 4 5; do
+            if git push -q origin "HEAD:$branch"; then exit 0; fi
+            echo "::warning::push rejected (attempt $attempt); rebasing onto the tap's latest $branch"
+            sleep $((attempt * 5))
+            git pull -q --rebase origin "$branch"
+          done
+          echo "::error::couldn't push to $TAP after 5 attempts"
+          exit 1

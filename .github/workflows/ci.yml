@@ -23,6 +23,7 @@ jobs:
       - run: yq '.' repos.yaml > /dev/null
       - run: scripts/test-steps.sh
       - run: scripts/test-npm-steps.sh
+      - run: scripts/test-mac-app-steps.sh
       - run: scripts/test-npm-bootstrap.sh
       - run: scripts/test-secrets-sync.sh
 

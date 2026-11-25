@@ -47,5 +47,28 @@ else fail "#{staged_path} in postflight_steps is rejected"; fi
 stage 's/#{staged_path}/{{staged_path}}/' gaze
 if audit; then ok "cask named like a core formula passes"; else fail "cask named like a core formula passes"; fi
 
+# mac-app-release.yml: the cask its writer makes for an app passes its
+# audit, which must stay the same as go-release.yml's.
+macwf=$here/../.github/workflows/mac-app-release.yml
+macaudit=$(yq '.jobs.cask.steps[] | select(.id == "audit") | .run' "$macwf")
+write=$(yq '.jobs.cask.steps[] | select(.id == "write") | .run' "$macwf")
+if [ "$macaudit" = "$step" ]; then ok "mac-app-release.yml audits like go-release.yml"
+else : > "$t/log"; fail "mac-app-release.yml audits like go-release.yml"; fi
+app_cask() { # <macos>
+  cask=gh-hud
+  rm -rf "$t/tap" && mkdir -p "$t/tap/Casks"
+  (cd "$t/tap/Casks" && CASK=gh-hud VERSION=0.3.20 ZIP=gh-hud-app_0.3.20.zip APP=build/gh-hud.app \
+    MACOS=$1 HOMEPAGE='' DESC="Dashboard for GitHub work and coding agents, a client of the gh-hud hub" \
+    SHA256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+    GITHUB_REPOSITORY=jflowers/gh-hud bash -c "$write" >/dev/null)
+  git -C "$t/tap" init -q
+  git -C "$t/tap" add -A
+  git -C "$t/tap" -c user.name=test -c user.email=test@example.com commit -qm cask
+}
+app_cask sonoma
+if audit; then ok "a Mac app's cask passes"; else fail "a Mac app's cask passes"; fi
+app_cask ""
+if audit; then ok "a Mac app's cask without depends_on passes"; else fail "a Mac app's cask without depends_on passes"; fi
+
 if [ "$fails" -ne 0 ]; then echo "$fails failed"; exit 1; fi
 echo "all passed"

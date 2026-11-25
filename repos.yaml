@@ -156,7 +156,6 @@ repos:
     tap: jflowers/homebrew-tools
     workflow: own
     checks: ["build-and-test"]
-    deps: deps-automerge.yml@v0.8.0 # jflowers/get-out#11
   jflowers/gh-slack-notify:
     kinds: [go-cli]
     workflow: none # released by tag only; built from source by mise

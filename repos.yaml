@@ -78,6 +78,7 @@ repos:
       the live Casks/replicator.rb (0.7.0) has "#{staged_path}" in
       postflight_steps, which Homebrew 7 can't read; main has the fix, and
       the next release publishes it
+    deps: deps-automerge.yml@v0.9.0 # unbound-force/replicator#199
   unbound-force/dewey:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
@@ -110,6 +111,7 @@ repos:
       transform at release time. verify-dispatch proved the wiring; the next
       release is its first through ship
     mise: go:github.com/unbound-force/unbound-force/cmd/unbound-force
+    deps: deps-automerge.yml@v0.9.0 # unbound-force/unbound-force#1227
   unbound-force/containerfile:
     kinds: [container]
     workflow: container-image.yml@v0.9.0 # unbound-force/containerfile#15

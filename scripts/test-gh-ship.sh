@@ -33,7 +33,10 @@ case "$1 $2" in
   "api repos/acme/tool/commits/main") echo 0123456789abcdef ;;
   "api repos/acme/tool/compare/"*) cat "$fix/ahead" ;;
   "api repos/acme/tool/commits/0123456789abcdef/check-runs?per_page=100") cat "$fix/failed" ;;
-  "workflow run") echo "$*" >> "$fix/dispatched" ;;
+  "workflow run")
+    echo "$*" >> "$fix/dispatched"
+    # Newer gh prints the run; GH_PRINTS_RUN stands in for it.
+    [ -z "${GH_PRINTS_RUN:-}" ] || echo "https://github.com/acme/tool/actions/runs/$GH_PRINTS_RUN" ;;
   "run list") echo 4242 ;;
   *) echo "fake gh: unexpected: $*" >&2; exit 9 ;;
 esac
@@ -89,6 +92,13 @@ fixture
 if release acme/tool v1.3.0-rc.1 --yes && grep -q 'tag=v1.3.0-rc.1' "$t/fix/dispatched"; then
   ok "a prerelease tag dispatches"
 else fail "a prerelease tag dispatches"; fi
+
+# A gh that prints the run's URL: it's used once, without looking it up.
+fixture
+if GH_PRINTS_RUN=777 release acme/tool v1.3.0 --yes && [ "$(grep -c 'actions/runs/' "$t/out")" -eq 1 ] &&
+  grep -qF 'https://github.com/acme/tool/actions/runs/777' "$t/out"; then
+  ok "the run gh prints is shown once"
+else fail "the run gh prints is shown once"; fi
 
 if [ "$fails" -ne 0 ]; then echo "$fails failed"; exit 1; fi
 echo "all passed"

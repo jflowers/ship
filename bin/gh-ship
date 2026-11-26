@@ -112,9 +112,13 @@ cmd_release() {
   fi
   local since
   since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  gh workflow run "$wf" -R "$repo" --ref "$branch" -f tag="$tag"
-  local id="" _
+  # Newer gh prints the run's URL; older gh prints nothing, so look for
+  # the run.
+  local out id="" _
+  out=$(gh workflow run "$wf" -R "$repo" --ref "$branch" -f tag="$tag")
+  id=$(grep -oE "/actions/runs/[0-9]+" <<<"$out" | head -1 | sed 's|.*/||' || true)
   for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -n "$id" ] && break
     id=$(gh run list -R "$repo" -w "$wf" -e workflow_dispatch -L 5 --json databaseId,createdAt \
       -q "[.[] | select(.createdAt >= \"$since\")][0].databaseId // empty")
     [ -n "$id" ] && break

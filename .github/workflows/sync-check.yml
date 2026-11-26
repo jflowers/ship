@@ -1,0 +1,33 @@
+# Weekly: checks every repo in repos.yaml against its own workflows
+# (scripts/sync-check.sh) and writes the report to the run's summary. The
+# run fails when a repo is out of sync; warnings (an older ship pin, a
+# post-release check a repo could add) don't fail it.
+
+name: Sync check
+
+on:
+  schedule:
+    - cron: "17 13 * * 1" # Mondays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Sync check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+      # The token reads public repos' workflows; repos.yaml's private repos
+      # release without ship (workflow: none), so they're skipped.
+      - name: Check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          scripts/sync-check.sh | tee -a "$GITHUB_STEP_SUMMARY"

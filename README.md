@@ -456,6 +456,37 @@ jobs:
       REGISTRY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
 ```
 
+### `cue-release.yml`: a CUE module on the CUE Central Registry
+
+1. **Settings**: the run is on the default branch, and the tag's major
+   version is the one `cue.mod/module.cue` names (`@v0` takes `v0.x.y`).
+2. **Preflight** (org-infra): semver, tag uniqueness, CI on HEAD,
+   unreleased commits; creates the tag.
+3. **Publish**: checks out the tag, logs in to the registry with the run's
+   OIDC token (`cue-labs/registry-login-action`), and runs
+   `cue mod publish <tag>`.
+4. **GitHub release**: created once the module is published, with generated
+   notes (a prerelease for a `vX.Y.Z-suffix` tag).
+
+The registry must trust the caller's repository
+([registry.cue.works/account/oidc](https://registry.cue.works/account/oidc));
+the token names the caller's repository, not ship. Caller permissions:
+`contents: write`, `checks: read`, `id-token: write`.
+
+```yaml
+jobs:
+  release:
+    uses: jflowers/ship/.github/workflows/cue-release.yml@<sha> # vX.Y.Z
+    with:
+      tag: ${{ inputs.tag }}
+      cue_version: v0.17.0
+      ci_checks: '["test"]'
+    permissions:
+      contents: write
+      checks: read
+      id-token: write
+```
+
 ## Secrets
 
 ship holds no secrets. Each caller passes its own, and

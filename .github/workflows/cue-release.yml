@@ -1,0 +1,170 @@
+# CUE module release
+# ==================
+# Tags a CUE module and publishes it to the CUE Central Registry. In order:
+#
+#   settings        before anything is tagged: the run is on the default
+#                   branch, and the tag's major version is the one the
+#                   module path in cue.mod/module.cue names (@v0 -> v0.x.y)
+#   preflight       org-infra: semver, tag uniqueness, CI on HEAD,
+#                   unreleased commits; creates the annotated tag
+#   publish         checks out the tag, logs in to the registry with the
+#                   run's OIDC token, and runs `cue mod publish <tag>`
+#   github-release  creates the GitHub release for the tag with generated
+#                   notes (a prerelease for vX.Y.Z-suffix tags), once the
+#                   module is published
+#
+# The registry trusts the caller's repository (registry.cue.works/account/oidc);
+# the OIDC token names the caller's repository even though this workflow
+# runs the login.
+#
+# Caller permissions: contents: write, checks: read, id-token: write.
+
+name: CUE module release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release (e.g. v0.4.0)
+        required: true
+        type: string
+      cue_version:
+        description: The cue version that publishes (setup-cue's `version`, e.g. v0.17.0).
+        required: true
+        type: string
+      ci_checks:
+        description: JSON array of check-run names that must pass on HEAD. Empty = org-infra auto-discovery.
+        type: string
+        default: ""
+      allow_prerelease:
+        type: boolean
+        default: true
+      skip_semver_check:
+        type: boolean
+        default: false
+      skip_ci_checks:
+        type: boolean
+        default: false
+      skip_unreleased_check:
+        type: boolean
+        default: false
+    outputs:
+      tag:
+        description: The tag preflight created; empty if it created none.
+        value: ${{ jobs.preflight.outputs.tag }}
+
+permissions: {}
+
+jobs:
+  settings:
+    name: Settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check the branch
+        env:
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Run the release from $DEFAULT_BRANCH (this run is on $REF)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Tested by scripts/test-cue-steps.sh (via yq). Keep the step id and
+      # the TAG interface; it reads cue.mod/module.cue in the working
+      # directory.
+      - name: Check the tag against the module path
+        id: major
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          f=cue.mod/module.cue
+          [ -f "$f" ] || { echo "::error::No $f: not a CUE module"; exit 1; }
+          module=$(sed -n 's/^module:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)
+          [ -n "$module" ] || { echo "::error::No module path in $f"; exit 1; }
+          case "$module" in
+            *@v[0-9]*) want=${module##*@} ;;
+            *) echo "::error::Module path $module has no major version (@vN)"; exit 1 ;;
+          esac
+          got=${TAG%%.*}
+          if [ "$got" != "$want" ]; then
+            echo "::error::Tag $TAG is major $got, but the module is $module"
+            exit 1
+          fi
+          echo "module=$module" >> "$GITHUB_OUTPUT"
+
+  preflight:
+    name: Preflight
+    needs: settings
+    uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
+    with:
+      tag: ${{ inputs.tag }}
+      ci_checks: ${{ inputs.ci_checks }}
+      allow_prerelease: ${{ inputs.allow_prerelease }}
+      skip_semver_check: ${{ inputs.skip_semver_check }}
+      skip_ci_checks: ${{ inputs.skip_ci_checks }}
+      skip_unreleased_check: ${{ inputs.skip_unreleased_check }}
+    permissions:
+      contents: write
+      checks: read
+
+  publish:
+    name: Publish to the CUE registry
+    needs: preflight
+    if: needs.preflight.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.preflight.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: cue-lang/setup-cue@b0e30e540a2dae47304ebf16586a5b2db023b61c # v2.0.0
+        with:
+          version: ${{ inputs.cue_version }}
+
+      - name: Log in to the CUE Central Registry
+        uses: cue-labs/registry-login-action@c7cf97db51448eaa8324e1ea4590deffa72df003 # v1.0.4
+
+      - name: Publish
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: cue mod publish "$TAG"
+
+  github-release:
+    name: GitHub release
+    needs: [preflight, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists; leaving it unchanged"
+            exit 0
+          fi
+          flags=(--verify-tag --generate-notes)
+          case "$TAG" in
+            *-*) flags+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" "${flags[@]}"

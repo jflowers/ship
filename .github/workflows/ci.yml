@@ -29,6 +29,7 @@ jobs:
       - run: scripts/test-npm-bootstrap.sh
       - run: scripts/test-secrets-sync.sh
       - run: scripts/test-deps-automerge.sh
+      - run: scripts/test-sync-check.sh
 
   audit:
     name: Cask audit (macOS)

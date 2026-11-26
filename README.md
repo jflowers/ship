@@ -491,11 +491,23 @@ key is: update the `.age` file, `chezmoi apply`, `secrets-sync.sh --apply`.
 Since callers hand these secrets to code in this repo, pin `uses:` to a
 SHA, never `@main`, and keep `main` protected.
 
+## Sync check
+
+`scripts/sync-check.sh` checks every repo in `repos.yaml` against its own
+workflows, read with `gh`: that it calls the ship workflows its entry lists,
+pinned to a ship tag; that a `go-release.yml` caller passes its `tap`, its
+`HOMEBREW_TAP_TOKEN` and the `go_install` package mise installs; and that its
+secret sets are used. It fails on any of those. An older pin, a pin
+`repos.yaml` doesn't record (Dependabot's ship group moves pins on its own),
+and a missing `go_install` or `tap_install_check` are warnings.
+`sync-check.yml` runs it every Monday and on dispatch, with the report in the
+run's summary.
+
 ## Develop
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-post-release.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh
+actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-post-release.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh && scripts/test-sync-check.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -520,13 +532,12 @@ against fixture repos, a fake `gh` and a fake `npm`.
 against a fixture config, a fake `HOME` and a fake `gh`.
 `scripts/test-deps-automerge.sh` runs `deps-automerge.yml`'s decide and gate
 steps and `settings-sync.sh` against a fake `gh`.
+`scripts/test-sync-check.sh` runs `sync-check.sh` against a fixture
+`repos.yaml` and fixture workflows.
 
 ## Roadmap
 
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
 - `gh ship status | release | secrets`, driven by `repos.yaml`
   (`secrets-sync.sh` becomes `gh ship secrets`)
-- A sync job that keeps each repo's `release.yml` current (the `@<sha>` pins
-  are already kept current by Dependabot's ship group, merged by
-  `deps-automerge.yml`)
 - gh-hud: a Releases view, and `toolkit.toml` generated from `repos.yaml`

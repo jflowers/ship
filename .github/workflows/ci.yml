@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
       - run: actionlint
-      - run: shellcheck scripts/*.sh
+      - run: shellcheck scripts/*.sh bin/gh-ship
       - run: yq '.' repos.yaml > /dev/null
       - run: scripts/test-steps.sh
       - run: scripts/test-npm-steps.sh
@@ -31,6 +31,7 @@ jobs:
       - run: scripts/test-secrets-sync.sh
       - run: scripts/test-deps-automerge.sh
       - run: scripts/test-sync-check.sh
+      - run: scripts/test-gh-ship.sh
 
   audit:
     name: Cask audit (macOS)

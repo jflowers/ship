@@ -534,11 +534,30 @@ and a missing `go_install` or `tap_install_check` are warnings.
 `sync-check.yml` runs it every Monday and on dispatch, with the report in the
 run's summary.
 
+## `gh ship`
+
+`bin/gh-ship` runs releases across the repos in `repos.yaml`. Install it as
+a `gh` alias from a clone:
+
+```bash
+gh alias set ship '!'"$PWD"'/bin/gh-ship "$@"'
+```
+
+- `gh ship status [owner/repo ...]`: each repo's latest release, the
+  commits since it, the ship version `repos.yaml` records, and its last
+  release run.
+- `gh ship release <owner/repo> <tag> [--yes] [--watch]`: checks what the
+  release's preflight will (the tag is semver, new and newer than the
+  latest; there are commits since it; no check run failed on the default
+  branch's HEAD), asks, then runs the repo's release workflow (the one that
+  calls ship with a `tag` input) and prints the run.
+- `gh ship secrets [args]`: `scripts/secrets-sync.sh`.
+
 ## Develop
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-post-release.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh && scripts/test-sync-check.sh
+actionlint && shellcheck scripts/*.sh bin/gh-ship && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-cue-steps.sh && scripts/test-post-release.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh && scripts/test-sync-check.sh && scripts/test-gh-ship.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -554,6 +573,8 @@ writer and `tag-release.yml`'s branch check, and checks that the signing
 import and tap steps it shares with `go-release.yml` haven't drifted;
 `test-audit-cask.sh` also audits a cask it writes.
 `scripts/test-container-steps.sh` runs `container-image.yml`'s settings check.
+`scripts/test-cue-steps.sh` runs `cue-release.yml`'s tag check against
+fixture `cue.mod/module.cue` files.
 `scripts/test-post-release.sh` runs `go-release.yml`'s post-release `go install`
 check against a fake `go`; `test-audit-cask.sh` also installs a cask from a
 tap by its `owner/homebrew-name` (on CI only).
@@ -565,10 +586,9 @@ against a fixture config, a fake `HOME` and a fake `gh`.
 steps and `settings-sync.sh` against a fake `gh`.
 `scripts/test-sync-check.sh` runs `sync-check.sh` against a fixture
 `repos.yaml` and fixture workflows.
+`scripts/test-gh-ship.sh` runs `gh ship release` against a fake `gh`.
 
 ## Roadmap
 
 - A GitHub App token for tap pushes instead of `HOMEBREW_TAP_TOKEN`
-- `gh ship status | release | secrets`, driven by `repos.yaml`
-  (`secrets-sync.sh` becomes `gh ship secrets`)
 - gh-hud: a Releases view, and `toolkit.toml` generated from `repos.yaml`

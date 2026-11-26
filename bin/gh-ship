@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# gh ship: releases across the repos in repos.yaml.
+#
+#   gh ship status [owner/repo ...]       latest release, commits since it,
+#                                         ship pin, last release run
+#   gh ship release <owner/repo> <tag> [--yes] [--watch]
+#                                         check the tag, confirm, then run
+#                                         the repo's release workflow
+#   gh ship sync                          scripts/sync-check.sh
+#   gh ship secrets [args]                scripts/secrets-sync.sh
+#
+# Install: gh alias set ship '!<path to ship>/bin/gh-ship "$@"'
+#
+# `release` checks before it dispatches what the workflow's preflight will:
+# the tag is semver, new, and newer than the latest tag; there are commits
+# since that tag; and no check run on the default branch's HEAD failed.
+# It runs the workflow that calls a ship workflow and takes a `tag` input.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+repos_yaml=${REPOS_YAML:-$here/../repos.yaml}
+
+die() { echo "gh ship: $*" >&2; exit 1; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
+
+# Repos on a ship workflow (not own/none), or the ones named.
+ship_repos() {
+  if (($#)); then printf '%s\n' "$@"; return; fi
+  yq '.repos | to_entries | .[] | select(.value.workflow // "" | test("^(own|none)") | not) | .key' "$repos_yaml"
+}
+
+# release_workflow <repo>: the workflow file that calls a ship workflow and
+# takes a `tag` input on workflow_dispatch.
+release_workflow() {
+  local f
+  for f in $(gh api "repos/$1/contents/.github/workflows" -q '.[] | select(.name | test("\\.ya?ml$")) | .name'); do
+    gh api "repos/$1/contents/.github/workflows/$f" -q .content | base64 -d > "$tmp/wf"
+    if yq -e '.on.workflow_dispatch.inputs.tag and ([.jobs[].uses // ""] | any_c(test("^jflowers/ship/")))' "$tmp/wf" >/dev/null 2>&1; then
+      echo "$f"
+      return
+    fi
+  done
+}
+
+# latest_tag <repo>: the highest semver tag, or empty
+latest_tag() {
+  gh api "repos/$1/tags?per_page=100" --paginate -q '.[].name' |
+    grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' | sort -V | tail -1 || true
+}
+
+# newer <a> <b>: a sorts after b as a version
+newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+
+cmd_status() {
+  printf '%-40s %-12s %6s  %-9s %s\n' REPO LATEST AHEAD SHIP "LAST RUN"
+  local repo tag ahead pin wf run
+  for repo in $(ship_repos "$@"); do
+    tag=$(latest_tag "$repo")
+    branch=$(gh api "repos/$repo" -q .default_branch)
+    ahead=-
+    [ -n "$tag" ] && ahead=$(gh api "repos/$repo/compare/$tag...$branch" -q .ahead_by 2>/dev/null || echo "?")
+    pin=$(yq ".repos[\"$repo\"].workflow // \"\"" "$repos_yaml" | grep -oE '@v[0-9.]+' | tr -d @ | head -1 || true)
+    wf=$(release_workflow "$repo")
+    run=-
+    if [ -n "$wf" ]; then
+      run=$(gh run list -R "$repo" -w "$wf" -L 1 --json conclusion,status,displayTitle,createdAt \
+        -q '.[0] | if . == null then "-" else "\(.createdAt[:10]) \(.conclusion // .status)" end')
+    fi
+    printf '%-40s %-12s %6s  %-9s %s\n' "$repo" "${tag:--}" "$ahead" "${pin:--}" "$run"
+  done
+}
+
+cmd_release() {
+  local repo="" tag="" yes=0 watch=0
+  while (($#)); do
+    case $1 in
+      --yes | -y) yes=1 ;;
+      --watch) watch=1 ;;
+      -*) die "unknown flag $1" ;;
+      *) if [ -z "$repo" ]; then repo=$1; elif [ -z "$tag" ]; then tag=$1; else die "too many arguments"; fi ;;
+    esac
+    shift
+  done
+  [ -n "$repo" ] && [ -n "$tag" ] || die "usage: gh ship release <owner/repo> <tag> [--yes] [--watch]"
+  yq -e ".repos[\"$repo\"]" "$repos_yaml" >/dev/null 2>&1 || die "$repo isn't in repos.yaml"
+
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "$tag isn't a semver tag (vX.Y.Z[-pre])"
+  if gh api "repos/$repo/git/ref/tags/$tag" >/dev/null 2>&1; then die "$repo already has $tag"; fi
+  local latest branch ahead head failed
+  latest=$(latest_tag "$repo")
+  if [ -n "$latest" ] && ! newer "$tag" "$latest"; then die "$tag isn't newer than $latest"; fi
+  branch=$(gh api "repos/$repo" -q .default_branch)
+  head=$(gh api "repos/$repo/commits/$branch" -q .sha)
+  if [ -n "$latest" ]; then
+    ahead=$(gh api "repos/$repo/compare/$latest...$head" -q .ahead_by)
+    [ "$ahead" -gt 0 ] || die "no commits since $latest"
+  else
+    ahead="all"
+  fi
+  failed=$(gh api "repos/$repo/commits/$head/check-runs?per_page=100" --paginate \
+    -q '.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | .name')
+  [ -z "$failed" ] || die "check runs failed on $branch ($head): $(paste -sd, - <<<"$failed")"
+  local wf
+  wf=$(release_workflow "$repo")
+  [ -n "$wf" ] || die "$repo has no workflow that calls ship with a tag input"
+
+  echo "$repo: $tag (latest ${latest:-none}, $ahead commits since), $wf on $branch @ ${head:0:7}"
+  if ((!yes)); then
+    [ -t 0 ] || die "not a terminal: pass --yes to release"
+    read -r -p "Release? [y/N] " answer
+    [[ "$answer" =~ ^[Yy] ]] || die "not released"
+  fi
+  local since
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  gh workflow run "$wf" -R "$repo" --ref "$branch" -f tag="$tag"
+  local id="" _
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    id=$(gh run list -R "$repo" -w "$wf" -e workflow_dispatch -L 5 --json databaseId,createdAt \
+      -q "[.[] | select(.createdAt >= \"$since\")][0].databaseId // empty")
+    [ -n "$id" ] && break
+    sleep "${GH_SHIP_POLL:-3}"
+  done
+  [ -n "$id" ] || die "dispatched, but no run showed up; see gh run list -R $repo -w $wf"
+  echo "https://github.com/$repo/actions/runs/$id"
+  if ((watch)); then gh run watch "$id" -R "$repo" --exit-status; fi
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+case "${1:-}" in
+  status) shift; cmd_status "$@" ;;
+  release) shift; cmd_release "$@" ;;
+  sync) shift; exec "$here/../scripts/sync-check.sh" "$@" ;;
+  secrets) shift; exec "$here/../scripts/secrets-sync.sh" "$@" ;;
+  "" | -h | --help | help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

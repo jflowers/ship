@@ -12,8 +12,9 @@
 # workflow: the shared workflow it calls today; "own" = not migrated yet.
 # migrating: the open PR that moves it to a shared workflow, until merged.
 # deps:     how its dependency PRs merge themselves: deps-automerge.yml
-#           (Dependabot) or renovate/automerge.json (Renovate), with the
-#           ship version it pins; absent = by hand.
+#           (Dependabot) or renovate/automerge.json (Renovate), and the PR
+#           that set it up; absent = by hand. No version: Dependabot's ship
+#           group moves the pin on its own.
 # mise:     its pin in chezmoi's dot_config/mise/config.toml, if any.
 # secrets:  the secret sets (below) its release needs; a repo with a `tap`
 #           also gets that tap's token as HOMEBREW_TAP_TOKEN.
@@ -77,7 +78,7 @@ repos:
     notes: >-
       its cask's postflight_steps come from a custom_block (the literal
       {{staged_path}} Homebrew 7 needs), live in the tap since v0.7.1
-    deps: deps-automerge.yml@v0.9.0 # unbound-force/replicator#199
+    deps: deps-automerge.yml # unbound-force/replicator#199
   unbound-force/dewey:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
@@ -88,7 +89,7 @@ repos:
       tap's Casks/dewey.rb keeps the deprecated `postflight do` hook (a hard
       error in Homebrew after 2027-12-11) until the next release
     mise: go:github.com/unbound-force/dewey/v3
-    deps: deps-automerge.yml@v0.8.0 # unbound-force/dewey#257
+    deps: deps-automerge.yml # unbound-force/dewey#257
   unbound-force/gaze:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
@@ -100,7 +101,7 @@ repos:
       three release gates of its own; go_install checks its mise package
       after each release (replacing its post-release-install-check.yml)
     mise: go:github.com/unbound-force/gaze/v2/cmd/gaze
-    deps: deps-automerge.yml@v0.8.0 # unbound-force/gaze#389
+    deps: deps-automerge.yml # unbound-force/gaze#389
   unbound-force/unbound-force:
     kinds: [go-cli, cask, formula]
     secrets: [macos-sign]
@@ -112,7 +113,7 @@ repos:
       transform at release time. verify-dispatch proved the wiring; the next
       release is its first through ship
     mise: go:github.com/unbound-force/unbound-force/cmd/unbound-force
-    deps: deps-automerge.yml@v0.9.0 # unbound-force/unbound-force#1227
+    deps: deps-automerge.yml # unbound-force/unbound-force#1227
   unbound-force/containerfile:
     kinds: [container]
     workflow: container-image.yml@v0.9.0 # unbound-force/containerfile#15
@@ -123,18 +124,18 @@ repos:
   unbound-force/intake-kit:
     kinds: [cue-module]
     workflow: own
-    deps: deps-automerge.yml@v0.8.0 # unbound-force/intake-kit#18
+    deps: deps-automerge.yml # unbound-force/intake-kit#18
 
   # --- zero-dot-force ---
   zero-dot-force/vibe-check:
     kinds: [go-cli]
     workflow: go-release.yml@v0.9.0 # zero-dot-force/vibe-check#105, #111
     mise: go:github.com/zero-dot-force/vibe-check/cmd/vibe-check
-    deps: deps-automerge.yml@v0.8.0 # zero-dot-force/vibe-check#109
+    deps: deps-automerge.yml # zero-dot-force/vibe-check#109
   zero-dot-force/snake-eyes:
     kinds: [pypi]
     workflow: tag-release.yml@v0.9.0 # zero-dot-force/snake-eyes#41, #44; PyPI trusted publishing stays in the caller's job
-    deps: deps-automerge.yml@v0.8.0 # zero-dot-force/snake-eyes#43
+    deps: deps-automerge.yml # zero-dot-force/snake-eyes#43
   zero-dot-force/reading-stone:
     kinds: [npm]
     workflow: npm-release.yml@v0.9.0 # zero-dot-force/reading-stone#34, #37, #39, #42, #46
@@ -143,7 +144,7 @@ repos:
       taken from the tag; npm's trusted publisher names release.yml and the
       `npm` environment. v0.2.2 was the first release through ship (on
       v0.3.0, GitHub release created by hand)
-    deps: deps-automerge.yml@v0.8.0 # zero-dot-force/reading-stone#45
+    deps: deps-automerge.yml # zero-dot-force/reading-stone#45
 
   # --- jflowers ---
   jflowers/gh-hud:
@@ -151,7 +152,7 @@ repos:
     secrets: [macos-sign, android-sign]
     tap: jflowers/homebrew-tools
     workflow: tag-release.yml + mac-app-release.yml@v0.9.0 # jflowers/gh-hud#193, #209, released v0.3.20
-    deps: deps-automerge.yml@v0.8.0 # jflowers/gh-hud#202
+    deps: deps-automerge.yml # jflowers/gh-hud#202
     mise: go:github.com/jflowers/gh-hud/cmd/gh-hud
   jflowers/gh-slack-notify:
     kinds: [go-cli]
@@ -170,7 +171,7 @@ repos:
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
     checks: ["check"]
-    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-supervisor#101
+    deps: deps-automerge.yml # jflowers/opencode-supervisor#101
   jflowers/opencode-auto-question:
     kinds: [npm]
     workflow: npm-release.yml@v0.9.0 # jflowers/opencode-auto-question#42, #44, #45; v0.9.0 by Dependabot's ship group
@@ -178,7 +179,7 @@ repos:
       published directly (personal account, stage: auto); npm's trusted
       publisher names publish.yml, which stays as the caller
     checks: ["typecheck and test"]
-    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-auto-question#47
+    deps: deps-automerge.yml # jflowers/opencode-auto-question#47
   jflowers/opencode-session-search:
     kinds: [npm]
     workflow: npm-release.yml@v0.9.0 # jflowers/opencode-session-search#2, #4, #13; v0.9.0 by Dependabot's ship group
@@ -187,7 +188,7 @@ repos:
       taken); 0.1.0 bootstrapped with scripts/npm-bootstrap.sh
       (trusted publisher publish.yml)
     checks: ["typecheck and test"]
-    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-session-search#16
+    deps: deps-automerge.yml # jflowers/opencode-session-search#16
   jflowers/opencode-session-notes:
     kinds: [npm]
     workflow: npm-release.yml@v0.9.0 # jflowers/opencode-session-notes#3, #5, #8; v0.9.0 by Dependabot's ship group
@@ -195,7 +196,7 @@ repos:
       0.1.0 bootstrapped with scripts/npm-bootstrap.sh (trusted
       publisher publish.yml)
     checks: ["typecheck and test"]
-    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-session-notes#13
+    deps: deps-automerge.yml # jflowers/opencode-session-notes#13
   jflowers/opencode-research-harness:
     kinds: [npm]
     workflow: npm-release.yml@v0.9.0 # jflowers/opencode-research-harness#11, #13, #18; v0.9.0 by Dependabot's ship group
@@ -203,7 +204,7 @@ repos:
       made public for provenance; 0.1.0 bootstrapped with
       scripts/npm-bootstrap.sh (trusted publisher publish.yml)
     checks: ["typecheck and test"]
-    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-research-harness#23
+    deps: deps-automerge.yml # jflowers/opencode-research-harness#23
   jflowers/opencode-debug-harness:
     kinds: [npm]
     workflow: npm-release.yml@v0.9.0 # jflowers/opencode-debug-harness#1, #5, #11; v0.9.0 by Dependabot's ship group
@@ -211,4 +212,4 @@ repos:
       made public for provenance; 0.1.0 bootstrapped with
       scripts/npm-bootstrap.sh (trusted publisher publish.yml)
     checks: ["typecheck and test"]
-    deps: deps-automerge.yml@v0.8.0 # jflowers/opencode-debug-harness#16
+    deps: deps-automerge.yml # jflowers/opencode-debug-harness#16

@@ -126,7 +126,11 @@ repos:
       quay.io; QUAY_USERNAME/QUAY_PASSWORD passed as REGISTRY_*
   unbound-force/intake-kit:
     kinds: [cue-module]
-    workflow: own
+    workflow: cue-release.yml@v0.11.0 # unbound-force/intake-kit#21
+    notes: >-
+      publishes to the CUE Central Registry with its own OIDC token (the
+      registry trusts the repo); replaced publish-cue.yml, which published
+      on tag push; no release through ship yet
     deps: deps-automerge.yml # unbound-force/intake-kit#18
 
   # --- zero-dot-force ---

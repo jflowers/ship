@@ -398,6 +398,70 @@ Same policy: third-party updates wait a day (`minimumReleaseAge`) and stay
 open for a person; non-major updates from our orgs have no wait and
 Renovate turns on GitHub auto-merge for them, by rebase.
 
+### `pr-scope.yml`: chore PRs skip the expensive CI jobs
+
+gh-hud lands two kinds of PR without an agent: Dewey learnings
+(`chore/dewey-learnings-*`) and toolkit rollouts (`chore/toolkit-*`, each
+tool's `init` output at a released version). It approves each as
+`uf-divisor` once it has checked the files, and its `[auto_merge]` merges
+them. This workflow lets their CI skip the build, test and lint jobs, so
+they merge in a minute. It generalizes dewey's `learnings-only.yml`.
+
+Its `code` output is `'false'` only for a pull request whose changed files
+are all:
+
+- **learnings**: regular `.md` files under `learnings_dir`
+  (`.uf/dewey/learnings/`), from anyone, or
+- **toolkit**: under `toolkit_paths` (`.opencode/`, space-separated), in a
+  PR `toolkit_author` (`jflowers`) opened from a `chore/toolkit-*` branch.
+
+Everything else is `'true'`: pushes, other files, renames into those
+directories, symlinks, submodules, `..`, and anything it can't parse.
+`scope` says which rule matched (`full`, `learnings` or `toolkit`).
+
+Gate the expensive jobs with a job-level `if:`, never with a workflow's
+`paths` filters: a workflow that doesn't run leaves its required check
+pending. A skipped job counts as passing, and a skipped matrix job reports
+no per-leg checks, so the required check must be one always-run job that
+fails unless the scope job succeeded and the jobs it chose passed. Require
+only that job (`checks:` in `repos.yaml`).
+
+```yaml
+# .github/workflows/ci.yml
+jobs:
+  scope:
+    uses: jflowers/ship/.github/workflows/pr-scope.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: read
+
+  test:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    # ...
+
+  ci-ok:
+    name: CI OK
+    needs: [scope, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          SCOPE: ${{ needs.scope.result }}
+          CODE: ${{ needs.scope.outputs.code }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          [ "$SCOPE" = success ] || { echo "::error::scope: $SCOPE"; exit 1; }
+          case "$CODE" in
+            true) [ "$TEST" = success ] || { echo "::error::test: $TEST"; exit 1; } ;;
+            false) [ "$TEST" = skipped ] || { echo "::error::test: $TEST"; exit 1; } ;;
+            *) echo "::error::scope code '$CODE'"; exit 1 ;;
+          esac
+```
+
+A pull request from a fork runs it too: it needs only `contents: read`.
+The toolkit rule trusts the PR's author and branch, which only that login
+can set; gh-hud checks the files again before it approves.
+
 ## Settings
 
 `repos.yaml`'s `settings:` is the GitHub settings every repo there should
@@ -557,7 +621,7 @@ gh alias set ship '!'"$PWD"'/bin/gh-ship "$@"'
 
 ```bash
 mise install
-actionlint && shellcheck scripts/*.sh bin/gh-ship && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-cue-steps.sh && scripts/test-post-release.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh && scripts/test-sync-check.sh && scripts/test-gh-ship.sh
+actionlint && shellcheck scripts/*.sh bin/gh-ship && scripts/test-steps.sh && scripts/test-npm-steps.sh && scripts/test-mac-app-steps.sh && scripts/test-container-steps.sh && scripts/test-cue-steps.sh && scripts/test-post-release.sh && scripts/test-npm-bootstrap.sh && scripts/test-secrets-sync.sh && scripts/test-deps-automerge.sh && scripts/test-pr-scope.sh && scripts/test-sync-check.sh && scripts/test-gh-ship.sh
 scripts/test-audit-cask.sh   # macOS
 ```
 
@@ -584,6 +648,8 @@ against fixture repos, a fake `gh` and a fake `npm`.
 against a fixture config, a fake `HOME` and a fake `gh`.
 `scripts/test-deps-automerge.sh` runs `deps-automerge.yml`'s decide and gate
 steps and `settings-sync.sh` against a fake `gh`.
+`scripts/test-pr-scope.sh` runs `pr-scope.yml`'s detect step against a fake
+`git` and fixture diffs.
 `scripts/test-sync-check.sh` runs `sync-check.sh` against a fixture
 `repos.yaml` and fixture workflows.
 `scripts/test-gh-ship.sh` runs `gh ship release` against a fake `gh`.

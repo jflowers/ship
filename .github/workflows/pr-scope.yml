@@ -1,0 +1,182 @@
+# PR scope: does this run need the full CI jobs?
+# ===============================================
+# Generalizes unbound-force/dewey's learnings-only check. Outputs
+# code == 'false' only for a pull request whose changed files are all
+# chores that gh-hud lands without an agent:
+#
+#   learnings  every file is a regular .md under learnings_dir (gh-hud's
+#              chore/dewey-learnings-* PRs, or anyone's: it is inert
+#              markdown agents read)
+#   toolkit    toolkit_author opened it from a chore/toolkit-* branch, and
+#              every file is under one of toolkit_paths (gh-hud's toolkit
+#              rollouts: each tool's `init` output at a released version)
+#
+# Anything else, a push, or anything it doesn't understand is code == 'true'
+# (scope 'full'): it fails closed. Callers gate their expensive jobs on it
+# with a job-level `if:`, never with workflow-level paths filters (a
+# workflow that doesn't run leaves its required check pending forever). A
+# skipped job counts as passing, so the required check must be an
+# always-run aggregate job that fails unless this job succeeded and the
+# jobs it chose passed; see ship's README, "pr-scope.yml".
+#
+# gh-hud approves these PRs as uf-divisor after checking the same files
+# itself, and its [auto_merge] merges them once this passes.
+#
+# Caller permissions: contents: read.
+
+name: PR scope
+
+on:
+  workflow_call:
+    inputs:
+      learnings_dir:
+        description: Dewey learnings directory, with a trailing slash; empty turns the learnings rule off.
+        type: string
+        default: .uf/dewey/learnings/
+      toolkit_paths:
+        description: Space-separated directories (trailing slash) a toolkit scaffold may change; empty turns the toolkit rule off.
+        type: string
+        default: .opencode/
+      toolkit_author:
+        description: The login gh-hud's toolkit rollouts open PRs as.
+        type: string
+        default: jflowers
+    outputs:
+      code:
+        description: "'true' when the run must execute the full CI jobs"
+        value: ${{ jobs.scope.outputs.code }}
+      scope:
+        description: full, learnings or toolkit
+        value: ${{ jobs.scope.outputs.scope }}
+
+permissions: {}
+
+jobs:
+  scope:
+    name: Scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+      scope: ${{ steps.detect.outputs.scope }}
+    steps:
+      # Pull requests check out refs/pull/N/merge: the commit CI tests.
+      # Two commits of history give its base parent (HEAD^1).
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          LEARNINGS_DIR: ${{ inputs.learnings_dir }}
+          TOOLKIT_PATHS: ${{ inputs.toolkit_paths }}
+          TOOLKIT_AUTHOR: ${{ inputs.toolkit_author }}
+        run: |
+          set -euo pipefail
+          result() { printf 'code=%s\nscope=%s\n' "$1" "$2" >>"$GITHUB_OUTPUT"; }
+          full() {
+            echo "full CI: $1"
+            result true full
+            exit 0
+          }
+
+          # A prefix is a relative directory: a trailing slash, no leading
+          # one, no . or .. segment.
+          prefix_ok() {
+            case "/$1" in
+              */ ) ;;
+              * ) return 1 ;;
+            esac
+            case "/$1" in
+              //* | */./* | */../* ) return 1 ;;
+            esac
+          }
+          read -ra toolkit_paths <<<"${TOOLKIT_PATHS:-}"
+          for p in ${LEARNINGS_DIR:+"$LEARNINGS_DIR"} ${toolkit_paths[@]+"${toolkit_paths[@]}"}; do
+            prefix_ok "$p" || { echo "::error::'$p' is not a relative directory with a trailing slash"; exit 1; }
+          done
+
+          # Only pull requests can skip. Pushes (main) run everything.
+          [ "$EVENT_NAME" = pull_request ] || full "event is $EVENT_NAME"
+
+          learnings=false
+          [ -z "${LEARNINGS_DIR:-}" ] || learnings=true
+          toolkit=false
+          if [ "${#toolkit_paths[@]}" -gt 0 ] && [ -n "${TOOLKIT_AUTHOR:-}" ] &&
+            [ "${AUTHOR:-}" = "$TOOLKIT_AUTHOR" ] && [[ ${HEAD_REF:-} == chore/toolkit-?* ]]; then
+            toolkit=true
+          fi
+          [ "$learnings" = true ] || [ "$toolkit" = true ] ||
+            full "no chore rule applies (author ${AUTHOR:-?}, branch ${HEAD_REF:-?})"
+
+          # Fail closed unless HEAD is the merge of the PR head into base.
+          parent=$(git rev-parse --verify --quiet 'HEAD^2^{commit}') || {
+            echo "::error::HEAD is not the pull request merge commit"
+            exit 1
+          }
+          if [ "$parent" != "$HEAD_SHA" ]; then
+            echo "::error::merge commit parent $parent is not PR head $HEAD_SHA"
+            exit 1
+          fi
+
+          # --no-renames lists both sides of a rename, so moving a file in
+          # from elsewhere still counts as code.
+          diff=$(git diff --raw --no-renames 'HEAD^1' HEAD)
+          seen=0
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "$line" ] || continue
+            seen=1
+            # ":<src mode> <dst mode> <src sha> <dst sha> <status>\t<path>"
+            case "$line" in
+              :*$'\t'*) ;;
+              *) full "unrecognized diff line: $line" ;;
+            esac
+            meta=${line%%$'\t'*}
+            path=${line#*$'\t'}
+            read -r src_mode dst_mode _ <<<"${meta#:}"
+            # Symlinks (120000) and submodules (160000) can point anywhere.
+            for mode in "$src_mode" "$dst_mode"; do
+              case "$mode" in
+                000000 | 100644 | 100755) ;;
+                *) full "mode $mode on $path" ;;
+              esac
+            done
+            # Paths git had to quote start with '"' and match no prefix.
+            case "/$path/" in
+              */../* | */./*) full "relative segment in $path" ;;
+            esac
+            if [ "$learnings" = true ]; then
+              case "$path" in
+                "$LEARNINGS_DIR"?*.md) ;;
+                *) learnings=false ;;
+              esac
+            fi
+            if [ "$toolkit" = true ]; then
+              under=false
+              for p in "${toolkit_paths[@]}"; do
+                case "$path" in
+                  "$p"?*) under=true ;;
+                esac
+              done
+              [ "$under" = true ] || toolkit=false
+            fi
+            [ "$learnings" = true ] || [ "$toolkit" = true ] ||
+              full "$path is neither a Dewey learning nor toolkit output"
+          done <<<"$diff"
+          [ "$seen" = 1 ] || full "no changed files"
+
+          if [ "$learnings" = true ]; then
+            echo "every changed file is a Dewey learning"
+            result false learnings
+          else
+            echo "a toolkit rollout: every changed file is under ${toolkit_paths[*]}"
+            result false toolkit
+          fi

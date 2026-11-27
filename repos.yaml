@@ -74,44 +74,47 @@ repos:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: go-release.yml@v0.9.0 # unbound-force/replicator#176, #197
+    workflow: go-release.yml@v0.10.0 # unbound-force/replicator#176, #197, #211
     notes: >-
       its cask's postflight_steps come from a custom_block (the literal
-      {{staged_path}} Homebrew 7 needs), live in the tap since v0.7.1
+      {{staged_path}} Homebrew 7 needs), live in the tap since v0.7.1;
+      tap_install_check runs `replicator --version` from the tap (first
+      passed at v0.8.0)
     deps: deps-automerge.yml # unbound-force/replicator#199
   unbound-force/dewey:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: go-release.yml@v0.9.0 # unbound-force/dewey#246, #269
+    workflow: go-release.yml@v0.10.0 # unbound-force/dewey#246, #269, #279
     notes: >-
-      its cask's postflight_steps come from a custom_block (dewey#273); the
-      tap's Casks/dewey.rb keeps the deprecated `postflight do` hook (a hard
-      error in Homebrew after 2027-12-11) until the next release
+      its cask's postflight_steps come from a custom_block (dewey#273), live
+      in the tap since v3.10.0 (the deprecated `postflight do` hook is gone);
+      go_install and tap_install_check run `dewey version`
     mise: go:github.com/unbound-force/dewey/v3
     deps: deps-automerge.yml # unbound-force/dewey#257
   unbound-force/gaze:
     kinds: [go-cli, cask]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: go-release.yml@v0.10.0 # unbound-force/gaze#362, #392, #403
+    workflow: go-release.yml@v0.10.0 # unbound-force/gaze#362, #392, #403, #416
     notes: >-
       its tap token is the repo secret HOMEBREW_TAP_GITHUB_TOKEN, mapped to
       HOMEBREW_TAP_TOKEN in its caller (the sync leaves it alone); keeps
       three release gates of its own; go_install checks its mise package
-      after each release (replacing its post-release-install-check.yml)
+      after each release (replacing its post-release-install-check.yml), and
+      tap_install_check runs `gaze --version` from the tap (first at v2.6.0)
     mise: go:github.com/unbound-force/gaze/v2/cmd/gaze
     deps: deps-automerge.yml # unbound-force/gaze#389
   unbound-force/unbound-force:
     kinds: [go-cli, cask, formula]
     secrets: [macos-sign]
     tap: unbound-force/homebrew-tap
-    workflow: go-release.yml@v0.9.0 # unbound-force/unbound-force#1224
+    workflow: go-release.yml@v0.10.0 # unbound-force/unbound-force#1224, #1235
     notes: >-
       formula: unbound-force and a cask_install_check (unbound-force, the uf
       alias); the cask's postflight_steps come from a custom_block, not a
-      transform at release time. verify-dispatch proved the wiring; the next
-      release is its first through ship
+      transform at release time. v0.23.0 was its first release through ship;
+      tap_install_check checks the uf link and `uf --version`
     mise: go:github.com/unbound-force/unbound-force/cmd/unbound-force
     deps: deps-automerge.yml # unbound-force/unbound-force#1227
   unbound-force/containerfile:
@@ -129,7 +132,8 @@ repos:
   # --- zero-dot-force ---
   zero-dot-force/vibe-check:
     kinds: [go-cli]
-    workflow: go-release.yml@v0.9.0 # zero-dot-force/vibe-check#105, #111
+    workflow: go-release.yml@v0.10.0 # zero-dot-force/vibe-check#105, #111, #115
+    notes: go_install checks its mise package after each release (first at v0.4.0)
     mise: go:github.com/zero-dot-force/vibe-check/cmd/vibe-check
     deps: deps-automerge.yml # zero-dot-force/vibe-check#109
   zero-dot-force/snake-eyes:
@@ -151,7 +155,7 @@ repos:
     kinds: [go-cli, mac-app, cask, android-apk]
     secrets: [macos-sign, android-sign]
     tap: jflowers/homebrew-tools
-    workflow: tag-release.yml + mac-app-release.yml@v0.9.0 # jflowers/gh-hud#193, #209, released v0.3.20
+    workflow: tag-release.yml + mac-app-release.yml@v0.10.0 # jflowers/gh-hud#193, #209, released v0.3.20
     deps: deps-automerge.yml # jflowers/gh-hud#202
     mise: go:github.com/jflowers/gh-hud/cmd/gh-hud
   jflowers/gh-slack-notify:
